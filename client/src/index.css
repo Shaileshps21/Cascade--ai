@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #0d0f1a;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #2d3158;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #6366f1;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface-800 border border-white/5 rounded-xl;
+  }
+
+  .btn-primary {
+    @apply bg-brand-500 hover:bg-brand-600 text-white font-medium px-4 py-2 rounded-lg transition-all duration-150 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply text-white/60 hover:text-white hover:bg-white/5 font-medium px-4 py-2 rounded-lg transition-all duration-150;
+  }
+
+  .input-field {
+    @apply w-full bg-surface-900 border border-white/10 rounded-lg px-4 py-3 text-white placeholder:text-white/30 focus:outline-none focus:border-brand-500 transition-colors;
+  }
+
+  .risk-badge {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .agent-step {
+    @apply flex items-start gap-3 p-3 rounded-lg border transition-all duration-300;
+  }
+}
+
+/* Animated gradient border on focused input */
+.input-glow:focus {
+  box-shadow: 0 0 0 1px #6366f1, 0 0 20px rgba(99, 102, 241, 0.15);
+}
+
+/* Terminal cursor blink */
+.cursor::after {
+  content: '▋';
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}

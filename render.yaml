@@ -1,0 +1,44 @@
+# render.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Render Blueprint — deploys the Node.js backend as a Web Service.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Setup:
+#   1. Push this repo to GitHub (public)
+#   2. Go to render.com → New → Blueprint
+#   3. Connect the repo — Render reads this file automatically
+#   4. Add all environment variables in the Render dashboard
+
+services:
+  - type: web
+    name: lifesaver-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000             # Render assigns this automatically
+      - key: GEMINI_API_KEY
+        sync: false              # Set manually in Render dashboard
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false              # Set to: https://<your-render-url>/api/calendar/callback
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true      # Render auto-generates a secure value
+      - key: CLIENT_URL
+        sync: false              # Set to: https://<your-project>.web.app
+    autoDeploy: true
+    plan: free                   # Free tier — stays active (Render free tier spins down after 15m idle)

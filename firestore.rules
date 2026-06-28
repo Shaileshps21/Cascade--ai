@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: is the request from a signed-in user?
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Helper: does the doc belong to the requesting user?
+    function isOwner(userId) {
+      return isAuth() && request.auth.uid == userId;
+    }
+
+    // ── Tasks ──────────────────────────────────────────────────────────────
+    match /tasks/{taskId} {
+      allow read, update, delete: if isOwner(resource.data.userId);
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // ── User profiles ──────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      // Nested settings (calendar tokens etc.) — owner only
+      match /settings/{doc} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Nested RAG entries — owner only
+      match /rag_entries/{entryId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+  }
+}

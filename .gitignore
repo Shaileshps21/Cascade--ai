@@ -1,0 +1,58 @@
+# ── Dependencies ──────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build outputs ─────────────────────────────────────────────
+client/dist/
+client/build/
+server/dist/
+
+# ── Environment / secrets ──────────────────────────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+server/.env
+client/.env
+
+# ── Firebase ───────────────────────────────────────────────────
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+database-debug.log
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── Editor / OS ───────────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+Thumbs.db
+
+# ── Misc ──────────────────────────────────────────────────────
+*.local
+.cache/
+coverage/
+
+# Firebase Admin SDK
+*.json
+!package.json
+!package-lock.json
+!firebase.json
+!firestore.indexes.json
+
+#
+*.stackdump
