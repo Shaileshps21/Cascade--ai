@@ -37,6 +37,13 @@ app.use('/api/tasks', tasksRouter);
 app.use('/api/calendar', calendarRouter);
 app.use('/api/auth', authRouter);
 
+app.get('/', (req, res) => {
+  res.json({
+    message: 'LifeSaver API is running 🚀',
+    version: '1.0.0',
+  });
+});
+
 app.get('/health', (req, res) => res.json({
   status: 'ok',
   timestamp: new Date().toISOString(),
