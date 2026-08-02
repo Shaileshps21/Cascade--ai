@@ -288,5 +288,3 @@ Unlike traditional task managers, **LifeSaver acts as an intelligent productivit
 It doesn't simply record tasks—it understands user intent, learns from past behavior, creates personalized execution strategies, schedules work automatically, and continuously adapts plans until the goal is achieved.
 
 > **From natural language → to intelligent execution → to successful completion.**
-
-MIT — built for the Google AI Studio Hackathon, June 2026.
