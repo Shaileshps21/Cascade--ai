@@ -4,7 +4,7 @@
       "collectionGroup": "tasks",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId",    "order": "ASCENDING"  },
+        { "fieldPath": "userId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
@@ -12,15 +12,8 @@
       "collectionGroup": "tasks",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status",   "order": "ASCENDING"  },
-        { "fieldPath": "deadline", "order": "ASCENDING"  }
-      ]
-    },
-    {
-      "collectionGroup": "rag_entries",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "deadline", "order": "ASCENDING" }
       ]
     }
   ],

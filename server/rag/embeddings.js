@@ -1,4 +1,14 @@
-import { embeddingModel } from '../config/gemini.js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import dotenv from 'dotenv';
+dotenv.config();
+
+// Standalone server-default embedding model — independent of the per-user
+// LLM provider choice (Groq has no embedding API, so RAG always uses the
+// server's own Gemini key for embeddings regardless of which provider the
+// user picked for text generation).
+const embeddingModel = process.env.GEMINI_API_KEY
+  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY).getGenerativeModel({ model: 'embedding-001' })
+  : null;
 
 /**
  * Generate a vector embedding for a piece of text.
@@ -8,6 +18,7 @@ import { embeddingModel } from '../config/gemini.js';
  * @returns {number[]}   – embedding vector
  */
 export async function generateEmbedding(text) {
+  if (!embeddingModel) return null;
   const result = await embeddingModel.embedContent(text);
   return result.embedding.values;
 }

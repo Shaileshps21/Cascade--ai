@@ -22,15 +22,59 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
-      // Nested settings (calendar tokens etc.) — owner only
+      // ── Nested settings — SERVER ONLY, no client access at all ───────────
+      // Holds provider API keys and Google Calendar refresh tokens: the two
+      // most sensitive values in the system. The client never reads Firestore
+      // directly (it uses Firebase purely for auth and reaches all data through
+      // the API), so nothing legitimate needs this path — granting the owner
+      // read access only leaves a door open for a stolen ID token or an XSS to
+      // exfiltrate a user's paid API key.
+      //
+      // The Admin SDK bypasses rules entirely, so the server is unaffected.
+      // Reachable instead via /api/settings/*, which never returns the key.
       match /settings/{doc} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if false;
       }
 
       // Nested RAG entries — owner only
       match /rag_entries/{entryId} {
         allow read, write: if isOwner(userId);
       }
+
+      // Nested briefings — owner only
+      match /briefings/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // ── Task History (for Memory Agent) ──────────────────────────────────
+    // Stores completed task records for historical speed/accuracy analysis.
+    match /task_history/{docId} {
+      allow read, update, delete: if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // ── User Benchmarks (for Evaluation Benchmark Agent) ─────────────────
+    // Per-user productivity metrics, speed profiles, and historical trends.
+    match /user_benchmarks/{docId} {
+      allow read, update, delete: if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // ── Knowledge Cache (for Knowledge Acquisition Agent) ─────────────────
+    // Cached knowledge packages keyed by goal embedding similarity.
+    // Readable by any authenticated user; writable by server only in practice.
+    match /knowledge_cache/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // ── System Benchmarks (for Evaluation Benchmark Agent) ────────────────
+    // Aggregate system-wide planner performance snapshots.
+    // Readable by any authenticated user; server-only writes in practice.
+    match /system_benchmarks/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
     }
   }
 }

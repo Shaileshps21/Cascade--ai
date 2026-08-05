@@ -47,12 +47,16 @@ Thumbs.db
 .cache/
 coverage/
 
-# Firebase Admin SDK
-*.json
-!package.json
-!package-lock.json
-!firebase.json
-!firestore.indexes.json
+# ── Firebase / GCP service-account credentials ────────────────────────────────
+# Target the credential files specifically. This used to be a blanket `*.json`
+# with a four-entry allowlist, which silently ignored every new JSON added to the
+# project — a tsconfig, an extra Firebase config, a fixture — and the omission
+# only ever surfaced as something missing in a deploy.
+*firebase-adminsdk*.json
+serviceAccount*.json
+service-account*.json
+gcp-credentials*.json
+*-credentials.json
 
 #
 *.stackdump

@@ -22,8 +22,10 @@ services:
         value: production
       - key: PORT
         value: 10000             # Render assigns this automatically
+      - key: GROQ_API_KEY
+        sync: false              # Set manually in Render dashboard (default provider)
       - key: GEMINI_API_KEY
-        sync: false              # Set manually in Render dashboard
+        sync: false              # Fallback provider — set at least one of these
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
@@ -36,8 +38,6 @@ services:
         sync: false
       - key: FIREBASE_PRIVATE_KEY
         sync: false
-      - key: SESSION_SECRET
-        generateValue: true      # Render auto-generates a secure value
       - key: CLIENT_URL
         sync: false              # Set to: https://<your-project>.web.app
     autoDeploy: true
