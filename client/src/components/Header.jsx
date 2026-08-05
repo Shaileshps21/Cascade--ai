@@ -10,7 +10,7 @@ export default function Header() {
         {/* Logo */}
         <div className="flex items-center gap-2.5">
           <span className="text-xl">⚡</span>
-          <span className="font-bold text-white tracking-tight">LifeSaver</span>
+          <span className="font-bold text-white tracking-tight">Cascade</span>
           <span className="hidden sm:inline text-[10px] font-mono text-white/20 border border-white/10 px-1.5 py-0.5 rounded">
             BETA
           </span>

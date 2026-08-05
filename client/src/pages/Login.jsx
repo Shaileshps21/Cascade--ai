@@ -35,7 +35,7 @@ export default function Login() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-500/10 border border-brand-500/30 mb-4">
             <span className="text-3xl">⚡</span>
           </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">LifeSaver</h1>
+          <h1 className="text-3xl font-bold text-white tracking-tight">Cascade</h1>
           <p className="mt-2 text-white/50 text-sm">AI-powered deadline companion</p>
         </div>
 
@@ -85,7 +85,7 @@ export default function Login() {
           </button>
 
           <p className="mt-4 text-center text-xs text-white/25">
-            By signing in you agree to let LifeSaver manage your tasks.
+            By signing in you agree to let Cascade manage your tasks.
           </p>
         </div>
       </div>
