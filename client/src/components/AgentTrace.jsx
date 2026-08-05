@@ -1,12 +1,22 @@
 import { useEffect, useRef } from 'react';
 
 const AGENT_META = {
-  parser:          { icon: '🔍', label: 'Task Parser',        color: 'text-sky-400',     border: 'border-sky-500/30',    bg: 'bg-sky-500/5'    },
-  prioritization:  { icon: '⚖️', label: 'Prioritization',     color: 'text-violet-400',  border: 'border-violet-500/30', bg: 'bg-violet-500/5' },
-  planning:        { icon: '📝', label: 'Planning',           color: 'text-amber-400',   border: 'border-amber-500/30',  bg: 'bg-amber-500/5'  },
-  scheduler:       { icon: '📅', label: 'Scheduler',          color: 'text-emerald-400', border: 'border-emerald-500/30',bg: 'bg-emerald-500/5'},
-  monitor:         { icon: '👁️', label: 'Monitor',            color: 'text-rose-400',    border: 'border-rose-500/30',   bg: 'bg-rose-500/5'   },
-  system:          { icon: '⚡', label: 'System',             color: 'text-white/60',    border: 'border-white/10',      bg: 'bg-white/3'      },
+  // ── Existing agents ───────────────────────────────────────────────────────
+  parser:          { icon: '🔍', label: 'Task Parser',        color: 'text-sky-400',     border: 'border-sky-500/30',      bg: 'bg-sky-500/5'      },
+  prioritization:  { icon: '⚖️', label: 'Prioritization',     color: 'text-violet-400',  border: 'border-violet-500/30',   bg: 'bg-violet-500/5'   },
+  planning:        { icon: '📝', label: 'Planning',           color: 'text-amber-400',   border: 'border-amber-500/30',    bg: 'bg-amber-500/5'    },
+  scheduler:       { icon: '📅', label: 'Scheduler',          color: 'text-emerald-400', border: 'border-emerald-500/30',  bg: 'bg-emerald-500/5'  },
+  monitor:         { icon: '👁️', label: 'Monitor',            color: 'text-rose-400',    border: 'border-rose-500/30',     bg: 'bg-rose-500/5'     },
+  system:          { icon: '⚡', label: 'System',             color: 'text-white/60',    border: 'border-white/10',        bg: 'bg-white/3'        },
+  // ── New agents (v3 modular architecture) ──────────────────────────────────
+  memory:          { icon: '🧠', label: 'Memory',             color: 'text-indigo-400',  border: 'border-indigo-500/30',   bg: 'bg-indigo-500/5'   },
+  knowledge:       { icon: '📚', label: 'Knowledge',          color: 'text-teal-400',    border: 'border-teal-500/30',     bg: 'bg-teal-500/5'     },
+  dependency:      { icon: '🔗', label: 'Dependencies',       color: 'text-orange-400',  border: 'border-orange-500/30',   bg: 'bg-orange-500/5'   },
+  estimation:      { icon: '⏱️', label: 'Estimation',         color: 'text-cyan-400',    border: 'border-cyan-500/30',     bg: 'bg-cyan-500/5'     },
+  feasibility:     { icon: '✅', label: 'Feasibility',        color: 'text-lime-400',    border: 'border-lime-500/30',     bg: 'bg-lime-500/5'     },
+  review:          { icon: '🔎', label: 'Review',             color: 'text-pink-400',    border: 'border-pink-500/30',     bg: 'bg-pink-500/5'     },
+  benchmark:       { icon: '📊', label: 'Benchmark',          color: 'text-slate-400',   border: 'border-slate-500/30',    bg: 'bg-slate-500/5'    },
+  calendar:        { icon: '🗓️', label: 'Calendar Sync',      color: 'text-green-400',   border: 'border-green-500/30',    bg: 'bg-green-500/5'    },
 };
 
 function StatusDot({ status }) {
@@ -62,11 +72,25 @@ function AgentEvent({ event }) {
  * @param {object}   finalData  – set when pipeline completes
  */
 export default function AgentTrace({ events, isStreaming, finalData, onDone }) {
-  const bottomRef = useRef(null);
+  // Ref on the scrollable container div — we scroll it directly via
+  // scrollTop rather than calling scrollIntoView() on a child element.
+  // scrollIntoView() propagates up to the page scroll if the target is
+  // near or below the viewport, which is exactly what caused the dashboard
+  // to jump away from the trace panel on every new event.
+  const scrollContainerRef = useRef(null);
 
-  // Auto-scroll to latest event
+  // Auto-scroll the panel's inner container (not the page) to the bottom
+  // whenever a new event arrives.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    // Only auto-scroll if the user is already near the bottom (within 80px),
+    // so a user who has manually scrolled up to read earlier events is not
+    // forcibly bounced back down.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (nearBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [events]);
 
   // Notify parent when done
@@ -77,7 +101,18 @@ export default function AgentTrace({ events, isStreaming, finalData, onDone }) {
   if (events.length === 0 && !isStreaming) return null;
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card overflow-hidden relative">
+      {/* Animated top-border while streaming — pulses to signal live activity */}
+      {isStreaming && (
+        <div
+          className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl"
+          style={{
+            background: 'linear-gradient(90deg, transparent, #6366f1, #8b5cf6, #6366f1, transparent)',
+            backgroundSize: '200% 100%',
+            animation: 'shimmer 2s linear infinite',
+          }}
+        />
+      )}
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
         <div className="flex gap-1.5">
@@ -100,8 +135,8 @@ export default function AgentTrace({ events, isStreaming, finalData, onDone }) {
         )}
       </div>
 
-      {/* Events stream */}
-      <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+      {/* Events stream — overflow scroll handled by container ref, not scrollIntoView */}
+      <div ref={scrollContainerRef} className="p-3 space-y-2 max-h-[480px] overflow-y-auto">
         {events.map((event, i) => (
           <AgentEvent key={i} event={event} />
         ))}
@@ -111,8 +146,6 @@ export default function AgentTrace({ events, isStreaming, finalData, onDone }) {
             <span className="cursor" />
           </div>
         )}
-
-        <div ref={bottomRef} />
       </div>
 
       {/* Summary bar when complete */}

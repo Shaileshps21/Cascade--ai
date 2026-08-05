@@ -41,7 +41,7 @@ export default function Login() {
 
         {/* Feature pills */}
         <div className="flex flex-wrap justify-center gap-2 mb-10">
-          {['5 AI Agents', 'RAG Personalization', 'Auto-Scheduler', 'Calendar Sync'].map((f) => (
+          {['15 AI Agents', 'RAG Personalization', 'Auto-Scheduler', 'Calendar Sync'].map((f) => (
             <span key={f} className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-white/60">
               {f}
             </span>
