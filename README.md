@@ -6,13 +6,6 @@ A multi-agent AI productivity system that proactively plans, prioritizes, and sc
 
 ---
 
-## 🏆 Hackathon Submission
-
-**Problem:** The Last-Minute Life Saver
-**Stack:** Google AI Studio (Gemini 1.5 Pro/Flash + text-embedding-004), Firebase, Google Calendar API, Node.js, React
-
----
-
 ## 🤖 The 5-Agent Pipeline
 
 Every task you type in plain English goes through a live, streaming agent pipeline:
@@ -112,6 +105,38 @@ last-minute-lifesaver/
 ├── render.yaml                      # Render deployment blueprint
 └── .gitignore
 ```
+
+# 🎯 End-to-End Workflow
+
+```text
+Natural Language Task
+           │
+           ▼
+     Parser Agent
+           │
+           ▼
+ Prioritization Agent
+      (RAG Memory)
+           │
+           ▼
+    Planning Agent
+           │
+           ▼
+   Scheduler Agent
+           │
+           ▼
+ Google Calendar Events
+           │
+           ▼
+   Monitor Agent (Cron)
+           │
+           ▼
+ Continuous Replanning
+           │
+           ▼
+    Task Completed 🎉
+```
+
 
 ---
 
@@ -256,18 +281,10 @@ Update `VITE_API_URL` in your client `.env` to your Render URL before building.
 
 ---
 
-## 📊 Evaluation Matrix
+# 💡 Why LifeSaver?
 
-| Criterion | How We Address It |
-|---|---|
-| **Agentic Depth (20%)** | 5 specialized agents chained via orchestrator; Agent 5 runs autonomously on cron |
-| **Problem Solving (20%)** | Directly solves deadline anxiety: parse → prioritize → plan → schedule → monitor |
-| **Innovation (20%)** | RAG on personal task history for unique personalization; live agent trace UI |
-| **Tech Execution** | Clean architecture, Firestore security rules, error handling, streaming |
-| **Presentation** | Real-time UI, risk meters, timeline, agent trace panel all show depth visually |
+Unlike traditional task managers, **LifeSaver acts as an intelligent productivity partner**.
 
----
+It doesn't simply record tasks—it understands user intent, learns from past behavior, creates personalized execution strategies, schedules work automatically, and continuously adapts plans until the goal is achieved.
 
-## 📄 License
-
-MIT — built for the Google AI Studio Hackathon, June 2026.
+> **From natural language → to intelligent execution → to successful completion.**
