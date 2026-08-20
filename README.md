@@ -1,4 +1,4 @@
-# ⚡ Casade — AI-Powered Deadline Companion
+# ⚡ Casade -AI - Powered Deadline Companion
 
 > *"Don't miss deadlines. Let agents handle it."*
 
