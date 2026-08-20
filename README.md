@@ -1,4 +1,4 @@
-# ⚡ LifeSaver — AI-Powered Deadline Companion
+# ⚡ Casade — AI-Powered Deadline Companion
 
 > *"Don't miss deadlines. Let agents handle it."*
 
@@ -61,7 +61,7 @@ The **Evaluation Benchmark Agent** is purely deterministic (no LLM calls) — it
 ## 📁 Project Structure
 
 ```
-last-minute-lifesaver/
+last-minute-Casade/
 ├── server/
 │   ├── index.js                          # Express server + cron (progress sweep, briefing)
 │   ├── config/
@@ -177,8 +177,8 @@ Natural Language Task
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/last-minute-lifesaver.git
-cd last-minute-lifesaver
+git clone https://github.com/YOUR_USERNAME/last-minute-Casade.git
+cd last-minute-Casade
 
 # Install backend
 cd server && npm install
@@ -418,9 +418,9 @@ Four requests, each root-caused and fixed:
 
 ---
 
-# 💡 Why LifeSaver?
+# 💡 Why Casade?
 
-Unlike traditional task managers, **LifeSaver acts as an intelligent productivity partner**.
+Unlike traditional task managers, **Casade acts as an intelligent productivity partner**.
 
 It doesn't simply record tasks—it understands user intent, learns from past behavior, creates personalized execution strategies, schedules work automatically around your real calendar and your own day/night rhythm, catches itself when a task is missed, and continuously adapts plans until the goal is achieved.
 
