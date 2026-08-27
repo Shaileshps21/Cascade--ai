@@ -5,7 +5,7 @@ const SLIDES = [
   {
     icon: 'lightning',
     emoji: '⚡',
-    headline: 'Welcome to LifeSaver',
+    headline: 'Welcome to Cascade',
     body: 'Describe any goal in plain English and 15 AI agents instantly break it into a step-by-step plan — milestones, subtasks, time estimates, and calendar schedule — all in under a minute.',
     visual: null,
   },

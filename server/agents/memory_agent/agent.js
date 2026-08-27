@@ -11,9 +11,14 @@ import { extractText, parseJSONWithRepair } from '../../config/Llm.js';
 import { writeNamespace } from '../contextManager.js';
 import { createAgentLog, completeAgentLog, attachToContext } from '../shared/logger.js';
 import { toMillis } from '../shared/firestoreUtil.js';
+import { classifyTaskCategory, DEFAULT_AVERAGE_SPEEDS } from '../shared/taskCategory.js';
 
 const AGENT_NAME = 'memory_agent';
 const MIN_HISTORY_FOR_DETERMINISTIC = 5;
+// A category needs at least this many completed, timed samples before its
+// real average replaces the generic default — one lucky/unlucky data point
+// shouldn't swing a user's calibration.
+const MIN_SAMPLES_PER_CATEGORY = 2;
 
 export async function runMemoryAgent(context, clients, eventBus = null, sseEmit = null) {
     const log = createAgentLog(AGENT_NAME, 'v1.0.0');
@@ -101,7 +106,56 @@ export async function runMemoryAgent(context, clients, eventBus = null, sseEmit 
     }
 }
 
-function computeMemoryDeterministic(history, benchmarkData, category) {
+/**
+ * Compute REAL per-category average speeds (minutes) from completed tasks in
+ * past projects, falling back to DEFAULT_AVERAGE_SPEEDS for any category with
+ * too few samples to trust.
+ *
+ * Reads `history[].taskPerformance[]` — the exact per-task actual-vs-
+ * estimated breakdown `contextManager.toTaskHistoryEntry()` already writes
+ * into `task_history` on every project completion (`{title, actualMinutes,
+ * status}`). This used to instead read `benchmarkData?.averageSpeeds`, but
+ * `evaluation_benchmark_agent` (the only writer of `user_benchmarks`) never
+ * actually writes an `averageSpeeds` field — that lookup was silently always
+ * undefined, so every user got the exact same hardcoded defaults regardless
+ * of real history. This computes it directly from data that does exist.
+ *
+ * Classification is by ALL of history (not just the current-category
+ * `source` subset used elsewhere in this function) — a "coding" task can
+ * appear inside a project whose overall `intent.category` was "academic",
+ * and its pace is still relevant to a future coding task.
+ *
+ * @param {Array<object>} history - task_history entries (up to 50, newest-first)
+ * @returns {{ averageSpeeds: Record<string, number>, sampleCounts: Record<string, number> }}
+ */
+export function computeAverageSpeedsFromHistory(history) {
+    const buckets = {};
+    for (const entry of history ?? []) {
+        for (const perf of entry.taskPerformance ?? []) {
+            if (perf?.status !== 'completed') continue;
+            if (typeof perf.actualMinutes !== 'number' || !Number.isFinite(perf.actualMinutes) || perf.actualMinutes <= 0) continue;
+            const category = classifyTaskCategory(perf.title);
+            if (!category) continue;
+            (buckets[category] ??= []).push(perf.actualMinutes);
+        }
+    }
+
+    const averageSpeeds = { ...DEFAULT_AVERAGE_SPEEDS };
+    const sampleCounts = {};
+    for (const [category, samples] of Object.entries(buckets)) {
+        sampleCounts[category] = samples.length;
+        if (samples.length >= MIN_SAMPLES_PER_CATEGORY) {
+            averageSpeeds[category] = Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
+        }
+    }
+
+    return { averageSpeeds, sampleCounts };
+}
+
+// `_benchmarkData` (from `user_benchmarks`) is accepted for signature
+// compatibility with the caller's existing fetch, but is no longer read here
+// — see computeAverageSpeedsFromHistory's doc comment for why.
+function computeMemoryDeterministic(history, _benchmarkData, category) {
     const categoryHistory = history.filter(h => h.category === category);
     const source = categoryHistory.length >= 3 ? categoryHistory : history;
 
@@ -120,10 +174,10 @@ function computeMemoryDeterministic(history, benchmarkData, category) {
     const completed = source.filter(h => h.status === 'completed').length;
     const averageSuccessRate = source.length > 0 ? completed / source.length : 0.75;
 
-    // Average speeds from benchmark
-    const averageSpeeds = benchmarkData?.averageSpeeds ?? {
-        coding: 30, writing: 45, research: 60, reading: 40, design: 50, debugging: 35, revision: 25,
-    };
+    // Real per-category average speeds computed from this user's own
+    // completed task history (see computeAverageSpeedsFromHistory above).
+    // `benchmarkData` isn't used here — see that function's doc comment.
+    const { averageSpeeds, sampleCounts: averageSpeedSampleCounts } = computeAverageSpeedsFromHistory(history);
 
     const reliabilityScore = Math.min(1, averageSuccessRate * (1 + (source.length / 50) * 0.2));
 
@@ -134,6 +188,12 @@ function computeMemoryDeterministic(history, benchmarkData, category) {
         commonFailures: ['Underestimating time', 'Scope creep', 'Insufficient testing'],
         bestWorkflowModules: ['Research', 'Design', 'Implementation', 'Testing'],
         averageSpeeds,
+        // Which categories above are backed by >= MIN_SAMPLES_PER_CATEGORY
+        // real completions vs. still sitting on the generic default — lets
+        // downstream consumers (time_estimation_agent's historical
+        // calibration blend) tell "personalized" from "coincidentally equal
+        // to the default" without an unsound value-equality guess.
+        averageSpeedSampleCounts,
         optimalWorkHours: [9, 10, 14, 15],
         reliabilityScore: parseFloat(reliabilityScore.toFixed(3)),
         reasoning: {
@@ -152,7 +212,8 @@ function buildEmptyMemory() {
         averageSuccessRate: 0.75,
         commonFailures: ['Underestimating complexity', 'Skipping testing'],
         bestWorkflowModules: ['Research', 'Design', 'Implementation', 'Testing'],
-        averageSpeeds: { coding: 30, writing: 45, research: 60, reading: 40, design: 50, debugging: 35, revision: 25 },
+        averageSpeeds: { ...DEFAULT_AVERAGE_SPEEDS },
+        averageSpeedSampleCounts: {},
         optimalWorkHours: [9, 10, 14, 15],
         reliabilityScore: 0.7,
         reasoning: { confidence: 0.5, assumptions: ['No history available'], warnings: ['No history'], promptVersion: 'v1.0.0' },

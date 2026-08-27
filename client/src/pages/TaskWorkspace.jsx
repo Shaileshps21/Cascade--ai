@@ -5,7 +5,8 @@ import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import ExecutionStepItem from '../components/ExecutionStepItem.jsx';
 import FocusMode from '../components/FocusMode.jsx';
 import ResourceLink from '../components/ResourceLink.jsx';
-import { getProjectTask, updateExecutionStep } from '../api/index.js';
+import MarkdownText from '../components/MarkdownText.jsx';
+import { getProjectTask, updateExecutionStep, setTaskNote } from '../api/index.js';
 
 const DIFFICULTY_COLOR = { low: 'text-emerald-400', medium: 'text-amber-400', high: 'text-rose-400', very_high: 'text-rose-500' };
 
@@ -29,6 +30,52 @@ function BulletList({ items, icon = '•' }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+// TaskNote — a single free-text markdown note per task, separate from
+// per-step notes and completionEvidence (suggestions.md #4).
+function TaskNote({ projectId, taskId, initialText, onSaved }) {
+  const [editing, setEditing] = useState(!initialText);
+  const [text, setText] = useState(initialText ?? '');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (text === (initialText ?? '')) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      await setTaskNote(projectId, taskId, text);
+      onSaved?.(text);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  };
+
+  return (
+    <div>
+      {!editing && (
+        <div className="flex justify-end mb-1">
+          <button onClick={() => setEditing(true)} className="text-xs text-brand-400 hover:text-brand-300">
+            {initialText ? 'Edit' : '+ Add note'}
+          </button>
+        </div>
+      )}
+      {editing ? (
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={save}
+          disabled={saving}
+          autoFocus
+          rows={3}
+          placeholder="Add a note for this task... (markdown: **bold**, *italic*, `code`, [link](url), - list)"
+          className="input-field text-sm"
+        />
+      ) : (
+        <MarkdownText text={initialText} className="text-sm text-white/60 leading-relaxed" />
+      )}
+    </div>
   );
 }
 
@@ -204,11 +251,14 @@ export default function TaskWorkspace() {
         </Section>
       )}
 
-      {task.notes?.length > 0 && (
-        <Section title="Notes">
-          <BulletList items={task.notes.map((n) => (typeof n === 'string' ? n : n?.text))} icon="📝" />
-        </Section>
-      )}
+      <Section title="Notes">
+        <TaskNote
+          projectId={projectId}
+          taskId={task.id}
+          initialText={typeof task.notes?.[0] === 'string' ? task.notes[0] : task.notes?.[0]?.text ?? ''}
+          onSaved={() => fetchTask()}
+        />
+      </Section>
 
       <Section title="History">
         <TaskTimeline project={project} task={task} />

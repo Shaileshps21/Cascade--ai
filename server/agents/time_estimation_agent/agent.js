@@ -18,11 +18,21 @@ import './schema.js'; // registers schema
 import { buildTimeEstimationPrompt } from './prompt_v1.js';
 import { runAgent } from '../shared/agentRunner.js';
 import { extractText, parseJSONWithRepair } from '../../config/Llm.js';
+import { classifyTaskCategory, DEFAULT_AVERAGE_SPEEDS } from '../shared/taskCategory.js';
 
 const AGENT_NAME = 'time_estimation_agent';
 const SSE_NAME = 'estimation';
 const SCHEMA_VERSION = '1.0.0';
 const PROMPT_VERSION = 'v1.0.0';
+
+// Historical Calibration of Per-Task Estimates (suggestions.md #24):
+// 60% LLM estimate / 40% historical pace, applied only where memory_agent
+// has computed a REAL per-category average from >= MIN_SAMPLES_PER_CATEGORY
+// completed tasks (memory.averageSpeedSampleCounts) — never against the
+// generic default it falls back to when there isn't enough history yet.
+export const LLM_ESTIMATE_WEIGHT = 0.6;
+export const HISTORICAL_CALIBRATION_WEIGHT = 0.4;
+const MIN_SAMPLES_PER_CATEGORY = 2;
 
 /**
  * Deterministic post-processing pass applied after LLM parsing.
@@ -83,6 +93,90 @@ export function applyEstimationConstraints(estimations) {
 }
 
 /**
+ * Blend each estimation's `finalEstimateMinutes` with the user's own
+ * historical pace for that task's category (suggestions.md #24), at
+ * LLM_ESTIMATE_WEIGHT / HISTORICAL_CALIBRATION_WEIGHT.
+ *
+ * `memory.averageSpeeds[category]` is "how many minutes a task like this
+ * actually took this user, on average" (see memory_agent's
+ * computeAverageSpeedsFromHistory). Comparing it against
+ * DEFAULT_AVERAGE_SPEEDS[category] — the same generic assumption the LLM's
+ * own estimate is implicitly anchored to when it has no better signal —
+ * gives a pace ratio: >1 means this user historically takes longer than the
+ * generic assumption for this category, <1 means faster. That ratio is
+ * applied multiplicatively to the LLM's own estimate (not the raw average
+ * speed substituted in directly), so the blend still reflects this specific
+ * task's own difficulty/complexity as judged by the LLM — only recalibrated
+ * by the user's demonstrated pace.
+ *
+ * Only applies when `memory.averageSpeedSampleCounts[category]` shows real
+ * data (>= MIN_SAMPLES_PER_CATEGORY completions) — never against a category
+ * still sitting on the generic default, and never by comparing values for
+ * equality (a real average CAN legitimately equal the default by
+ * coincidence; sample count is the actual evidence signal).
+ *
+ * Scales the whole three-point estimate (optimistic/expected/worstCase) by
+ * the same factor as finalEstimateMinutes, so the ordering constraint
+ * (optimistic <= expected <= worstCase) is preserved automatically —
+ * uniformly scaling three already-ordered positive numbers can't break their
+ * relative order.
+ *
+ * Pure function — does not mutate the input array; returns a new array.
+ * No-op (returns `estimations` unchanged) when `memory` has no usable data.
+ *
+ * @param {Array<object>} estimations - already `applyEstimationConstraints`-cleaned
+ * @param {Array<object>} tasks - context.planning.tasks (for title -> category classification)
+ * @param {object|null} memory - context.memory
+ * @returns {Array<object>} estimations, calibrated where applicable
+ */
+export function applyHistoricalCalibration(estimations, tasks, memory) {
+    const averageSpeeds = memory?.averageSpeeds;
+    const sampleCounts = memory?.averageSpeedSampleCounts;
+    if (!averageSpeeds || typeof averageSpeeds !== 'object' || !sampleCounts || typeof sampleCounts !== 'object') {
+        return estimations;
+    }
+
+    const taskById = new Map((tasks ?? []).map((t) => [t.taskId, t]));
+
+    return estimations.map((entry) => {
+        const task = taskById.get(entry.taskId);
+        const category = task ? classifyTaskCategory(`${task.title ?? ''} ${(task.requiredSkills ?? []).join(' ')}`) : null;
+        if (!category) return entry;
+
+        // The actual evidence gate — not a value comparison.
+        if (!((sampleCounts[category] ?? 0) >= MIN_SAMPLES_PER_CATEGORY)) return entry;
+
+        const userSpeed = averageSpeeds[category];
+        const defaultSpeed = DEFAULT_AVERAGE_SPEEDS[category];
+        if (typeof userSpeed !== 'number' || !Number.isFinite(userSpeed) || userSpeed <= 0) return entry;
+
+        const originalFinal = entry.finalEstimateMinutes;
+        if (typeof originalFinal !== 'number' || !Number.isFinite(originalFinal) || originalFinal <= 0) return entry;
+
+        const paceRatio = userSpeed / defaultSpeed;
+        const historicalMinutes = originalFinal * paceRatio;
+        const blendedFinal = LLM_ESTIMATE_WEIGHT * originalFinal + HISTORICAL_CALIBRATION_WEIGHT * historicalMinutes;
+        const scaleFactor = blendedFinal / originalFinal;
+
+        const scale = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * scaleFactor) : v);
+
+        return {
+            ...entry,
+            finalEstimateMinutes: Math.round(blendedFinal),
+            expectedMinutes: scale(entry.expectedMinutes),
+            optimisticMinutes: scale(entry.optimisticMinutes),
+            worstCaseMinutes: scale(entry.worstCaseMinutes),
+            historicalCalibration: {
+                category,
+                userAverageSpeedMinutes: userSpeed,
+                defaultAverageSpeedMinutes: defaultSpeed,
+                paceRatio: Math.round(paceRatio * 100) / 100,
+            },
+        };
+    });
+}
+
+/**
  * Run the Time Estimation Agent.
  * Reads: context.planning.tasks, context.dependency, context.memory, context.benchmark
  * Writes: context.estimation
@@ -130,6 +224,9 @@ export async function runTimeEstimationAgent(context, clients, eventBus = null, 
             // Deterministic post-processing pass — enforce the hard ordering
             // constraint and backfill any missing finalEstimateMinutes.
             parsed.estimations = applyEstimationConstraints(parsed.estimations);
+            // Historical Calibration (suggestions.md #24) — blend in the
+            // user's own demonstrated pace where real history exists.
+            parsed.estimations = applyHistoricalCalibration(parsed.estimations, tasks, ctx.memory);
 
             // Attach token usage to result for agentRunner logging
             if (result?.usage) {

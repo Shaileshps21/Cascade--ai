@@ -22,9 +22,6 @@ export function buildTimeEstimationPrompt(tasks, memory, benchmark, dependency) 
     const bench = benchmark ?? {};
     const dep = dependency ?? {};
 
-    const averageSpeeds = mem.averageSpeeds ?? {
-        coding: 0, writing: 0, research: 0, reading: 0, design: 0, debugging: 0, revision: 0,
-    };
     const reliabilityScore = typeof mem.reliabilityScore === 'number' ? mem.reliabilityScore : 0.5;
 
     const criticalPath = Array.isArray(dep.criticalPath) ? dep.criticalPath : [];
@@ -47,9 +44,13 @@ using a multi-factor adjustment chain, and return them all in ONE JSON response.
 ## Adjustment Chain (apply in this exact order, each as a percentage of the running estimate)
 1. Base Estimate — start from the task's baseline estimate (planning agent's rough guess), or infer
    one from difficulty + requiredSkills if the baseline is 0/missing.
-2. Historical Adjustment (historicalAdjustmentPct) — use the user's historical averageSpeeds and
-   benchmark bias below. If the user is historically SLOWER than baseline assumptions for this skill
-   type, this should be POSITIVE (increase time). If faster, NEGATIVE.
+2. Historical Adjustment (historicalAdjustmentPct) — use ONLY the benchmark bias data below (context.benchmark)
+   and reliabilityScore, e.g. a low reliabilityScore or benchmark data showing consistent past overruns
+   justifies a positive adjustment here. Do NOT try to factor in the user's per-category average speed
+   yourself — a separate deterministic step recalibrates finalEstimateMinutes against the user's real
+   historical pace for this task's category AFTER your response, using data you are not shown. If you
+   also adjust for that same signal here, it gets applied twice. When benchmark data is sparse/empty,
+   leave this factor at or near 0 rather than guessing.
 3. Complexity Adjustment (complexityAdjustmentPct) — based on task difficulty and required skill breadth.
 4. Confidence Adjustment (confidenceAdjustmentPct) — how well-specified the task is; ambiguous/novel
    tasks get a positive bump, well-understood/routine tasks can get a negative (reducing) adjustment.
@@ -65,8 +66,8 @@ finalEstimateMinutes = baseEstimateMinutes * (1 + (historicalAdjustmentPct + com
 HARD CONSTRAINT: optimisticMinutes <= expectedMinutes <= worstCaseMinutes for every task. Never violate this.
 
 ## User Historical Context (context.memory)
-averageSpeeds (minutes-per-unit-of-work by category, 0 = no data yet): ${JSON.stringify(averageSpeeds)}
 reliabilityScore (0-1, how consistently the user hits their own estimates): ${reliabilityScore}
+(Per-category average speed is intentionally withheld here — see the Historical Adjustment rule above.)
 
 ## Benchmark / Historical Bias Data (context.benchmark — may be sparse or empty; treat defensively)
 ${JSON.stringify(bench)}

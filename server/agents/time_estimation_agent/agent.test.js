@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyEstimationConstraints } from './agent.js';
+import { applyEstimationConstraints, applyHistoricalCalibration, LLM_ESTIMATE_WEIGHT, HISTORICAL_CALIBRATION_WEIGHT } from './agent.js';
 import './schema.js'; // registers the schema
 import { validateAgentOutput } from '../shared/validator.js';
 
@@ -116,6 +116,67 @@ test('applyEstimationConstraints: does not mutate the input array/objects', () =
     const original = { ...entry };
     applyEstimationConstraints([entry]);
     assert.deepEqual(entry, original);
+});
+
+// ── applyHistoricalCalibration (suggestions.md #24) ─────────────────────────
+
+function makeTask(overrides = {}) {
+    return { taskId: 'T1', title: 'Implement the login API', requiredSkills: [], ...overrides };
+}
+
+test('applyHistoricalCalibration: no-op when memory has no averageSpeeds data', () => {
+    const estimations = [validEntry({ finalEstimateMinutes: 100 })];
+    const result = applyHistoricalCalibration(estimations, [makeTask()], null);
+    assert.deepEqual(result, estimations);
+});
+
+test('applyHistoricalCalibration: no-op when the category has too few samples (still on the default)', () => {
+    const estimations = [validEntry({ finalEstimateMinutes: 100 })];
+    const memory = {
+        averageSpeeds: { coding: 45 }, // differs from the default (30) but...
+        averageSpeedSampleCounts: { coding: 1 }, // ...only 1 sample, below MIN_SAMPLES_PER_CATEGORY
+    };
+    const result = applyHistoricalCalibration(estimations, [makeTask()], memory);
+    assert.equal(result[0].finalEstimateMinutes, 100);
+    assert.equal(result[0].historicalCalibration, undefined);
+});
+
+test('applyHistoricalCalibration: no-op when the task title matches no known category', () => {
+    const estimations = [validEntry({ finalEstimateMinutes: 100 })];
+    const memory = { averageSpeeds: { coding: 60 }, averageSpeedSampleCounts: { coding: 5 } };
+    const result = applyHistoricalCalibration(estimations, [makeTask({ title: 'xyz zzz qqq' })], memory);
+    assert.equal(result[0].finalEstimateMinutes, 100);
+});
+
+test('applyHistoricalCalibration: blends toward a slower-than-default historical pace', () => {
+    // Default coding speed is 30 min; this user's real average is 60 min
+    // (2x slower) with plenty of samples.
+    const estimations = [validEntry({
+        finalEstimateMinutes: 100, expectedMinutes: 100, optimisticMinutes: 50, worstCaseMinutes: 150,
+    })];
+    const memory = { averageSpeeds: { coding: 60 }, averageSpeedSampleCounts: { coding: 5 } };
+    const [result] = applyHistoricalCalibration(estimations, [makeTask({ title: 'Implement the login API' })], memory);
+
+    const paceRatio = 60 / 30; // 2
+    const expectedFinal = Math.round(LLM_ESTIMATE_WEIGHT * 100 + HISTORICAL_CALIBRATION_WEIGHT * (100 * paceRatio));
+    assert.equal(result.finalEstimateMinutes, expectedFinal);
+    assert.ok(result.finalEstimateMinutes > 100, 'a 2x-slower historical pace should raise the estimate');
+    assert.equal(result.historicalCalibration.category, 'coding');
+    assert.equal(result.historicalCalibration.paceRatio, 2);
+
+    // Three-point ordering must still hold after scaling.
+    assert.ok(result.optimisticMinutes <= result.expectedMinutes);
+    assert.ok(result.expectedMinutes <= result.worstCaseMinutes);
+});
+
+test('applyHistoricalCalibration: blends toward a faster-than-default historical pace', () => {
+    // This user's real debugging average is 17.5 min vs. the 35 min default — twice as fast.
+    const estimations = [validEntry({ taskId: 'T2', finalEstimateMinutes: 40 })];
+    const memory = { averageSpeeds: { debugging: 17.5 }, averageSpeedSampleCounts: { debugging: 4 } };
+    const [result] = applyHistoricalCalibration(estimations, [makeTask({ taskId: 'T2', title: 'Debug the checkout bug' })], memory);
+
+    assert.ok(result.finalEstimateMinutes < 40, 'a faster historical pace should lower the estimate');
+    assert.equal(result.historicalCalibration.paceRatio, 0.5);
 });
 
 // ── Schema validation ───────────────────────────────────────────────────────

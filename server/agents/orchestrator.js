@@ -43,6 +43,7 @@ import { runSchedulerAgent } from './scheduler_agent/agent.js';
 import { getFreeBusy, syncScheduleToCalendar } from './google_calendar_agent/agent.js';
 import { reassessTask, runProgressCron } from './progress_tracking_agent/agent.js';
 import { runReplanningAgent } from './replanning_agent/agent.js';
+import { getCrossProjectBusySlots } from './shared/crossProjectBusySlots.js';
 
 const MAX_PLANNING_REVISIONS = 2;
 const REVIEW_QUALITY_THRESHOLD = 80;
@@ -187,7 +188,7 @@ export async function orchestrateTask(processId, rawInput, userId, explicitDeadl
   const taskId = opts.resumeTaskId ?? uuidv4();
 
   try {
-    emitter({ agent: 'system', status: 'start', message: '🚀 LifeSaver activated — launching 15-agent pipeline...' });
+    emitter({ agent: 'system', status: 'start', message: '🚀 Cascade activated — launching 15-agent pipeline...' });
 
     const { clients, isPersonal } = await getUserClients(userId);
     if (!clients) throw new Error('NO_CLIENTS');
@@ -310,8 +311,18 @@ export async function orchestrateTask(processId, rawInput, userId, explicitDeadl
         ?? context.explicitDeadline
         ?? new Date(Date.now() + DEFAULT_HORIZON_MS).toISOString();
       if (!context.schedule) {
-        const busySlots = await getCalendarBusySlots(userId, new Date().toISOString(), deadlineForBusy);
-        await runSchedulerAgent(context, clients, eventBus, sseEmit, busySlots);
+        // Cross-Project Conflict Detection (suggestions.md #25): other active
+        // Cascade projects' already-scheduled tasks are treated as opaque
+        // busy blocks alongside real Google Calendar events, so two
+        // concurrent projects can't silently book the same slot.
+        const [busySlots, crossProjectBusySlots] = await Promise.all([
+          getCalendarBusySlots(userId, new Date().toISOString(), deadlineForBusy),
+          getCrossProjectBusySlots(userId, taskId),
+        ]);
+        if (crossProjectBusySlots.length > 0) {
+          sseEmit('scheduler', 'thinking', `🔍 Found ${crossProjectBusySlots.length} busy slot(s) from your other active projects — avoiding overlaps`, null);
+        }
+        await runSchedulerAgent(context, clients, eventBus, sseEmit, [...busySlots, ...crossProjectBusySlots]);
 
         if ((context.schedule?.schedulingScore ?? 100) < SCHEDULING_SCORE_THRESHOLD) {
           await runReviewAgent(context, clients, eventBus, sseEmit, 'schedule');

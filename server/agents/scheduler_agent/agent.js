@@ -362,9 +362,8 @@ export function buildFailureConditions(feasibilityCheck, context) {
 }
 
 /**
- * Build the deterministic candidate skeleton: tasks placed in topological
- * order (falling back to declaration order), each finding the next free
- * slot after the previous task's end + a small gap, avoiding busySlots and
+ * Sequentially place `orderedTaskIds`, each finding the next free slot after
+ * the previous task's end + a small gap, avoiding busySlots and
  * outside-working-hours placement. The first task is anchored to
  * FIRST_TASK_DELAY_MINUTES after project creation (Rule 1).
  *
@@ -374,30 +373,25 @@ export function buildFailureConditions(feasibilityCheck, context) {
  * before placing the next task. This is what actually makes a 7-day project
  * use all 7 days instead of finishing in the first one or two.
  *
- * @param {object} context
- * @param {Array<{start:string|Date, end:string|Date}>} [busySlots]
- * @param {number} [dailyBudgetMinutes] - max minutes of work placed per calendar day (weekdays)
- * @param {number} [workStartHour] - start of the user's working-hours window (day/night preference)
- * @param {number} [workEndHour] - end of the user's working-hours window (day/night preference)
- * @param {string} [weekendMode] - 'skip' | 'light' | 'normal'
+ * Extracted out of buildScheduleSkeleton() so it can be run twice: once in
+ * dependency/topological order, and — for Priority-Weighted Within-Day
+ * Ordering (suggestions.md #21) — a second time over that same task set with
+ * only the within-day order changed. Running the identical placement logic
+ * both times (rather than patching times after the fact) means real
+ * durations, busy-slot conflicts and day budgets stay correct in both passes.
+ *
+ * @param {string[]} orderedTaskIds
+ * @param {Map<string,object>} taskById
+ * @param {Map<string,object>} estimationMap
+ * @param {Date} createdAt
+ * @param {Array<{start:string|Date, end:string|Date}>} busySlots
+ * @param {number} dailyBudgetMinutes
+ * @param {number} workStartHour
+ * @param {number} workEndHour
+ * @param {string} weekendMode
  * @returns {Array<object>} skeleton entries (see shape below)
  */
-export function buildScheduleSkeleton(context, busySlots = [], dailyBudgetMinutes = DEFAULT_DAILY_AVAILABLE_MINUTES, workStartHour = WORK_START_HOUR, workEndHour = WORK_END_HOUR, weekendMode = DEFAULT_WEEKEND_MODE) {
-    const planningTasks = context?.planning?.tasks ?? [];
-    if (planningTasks.length === 0) return [];
-
-    const estimationMap = new Map((context?.estimation?.estimations ?? []).map(e => [e.taskId, e]));
-    const taskById = new Map(planningTasks.map(t => [t.taskId, t]));
-
-    const topoOrder = context?.dependency?.topologicalOrdering;
-    const orderedTaskIds = Array.isArray(topoOrder) && topoOrder.length > 0
-        ? [
-            ...topoOrder.filter(id => taskById.has(id)),
-            ...planningTasks.map(t => t.taskId).filter(id => !topoOrder.includes(id)),
-        ]
-        : planningTasks.map(t => t.taskId);
-
-    const createdAt = new Date(context?.metadata?.createdAt ?? Date.now());
+function placeTasksInOrder(orderedTaskIds, taskById, estimationMap, createdAt, busySlots, dailyBudgetMinutes, workStartHour, workEndHour, weekendMode) {
     let cursor = new Date(createdAt.getTime() + FIRST_TASK_DELAY_MINUTES * 60_000);
     let dayKey = cursor.toDateString();
     let minutesScheduledToday = 0;
@@ -462,6 +456,119 @@ export function buildScheduleSkeleton(context, busySlots = [], dailyBudgetMinute
     }
 
     return skeleton;
+}
+
+// ── Priority-Weighted Within-Day Ordering (suggestions.md #21) ────────────────
+// The placement pass above places tasks in dependency/topological order
+// across days; within a single day they land in whatever order the topo-sort
+// produced, ignoring priority. The scheduler prompt already asks the LLM for
+// priority-aware, energy-aware ordering (Rule 5 / "Energy-aware scheduling"),
+// but a prompted preference isn't a guarantee. This is a deterministic,
+// zero-LLM-call pass applied to the skeleton before it's ever shown to the
+// LLM, so the LLM is nudged to preserve an already-correct order rather than
+// invent one.
+const PRIORITY_RANK = { critical: 3, high: 2, medium: 1, low: 0 };
+const DIFFICULTY_RANK = { very_high: 3, high: 2, medium: 1, low: 0 };
+
+/**
+ * Comparator for same-day skeleton entries: critical > high > medium > low
+ * priority first, then harder-difficulty tasks earlier (mirrors the
+ * scheduler prompt's own difficulty → energyLevel convention, since skeleton
+ * entries don't carry an energyLevel of their own yet — that's assigned
+ * later, by the LLM or the fallback conversion). Buffer/review slots are
+ * structural padding/verification, not user-prioritized work, so they always
+ * sink to the end of the day regardless of their nominal priority field.
+ * @param {object} a
+ * @param {object} b
+ * @returns {number}
+ */
+function compareForDayOrder(a, b) {
+    const aStructural = a.isBuffer || a.isReview;
+    const bStructural = b.isBuffer || b.isReview;
+    if (aStructural !== bStructural) return aStructural ? 1 : -1;
+
+    const priorityDiff = (PRIORITY_RANK[b.priority] ?? 1) - (PRIORITY_RANK[a.priority] ?? 1);
+    if (priorityDiff !== 0) return priorityDiff;
+
+    return (DIFFICULTY_RANK[b.difficulty] ?? 1) - (DIFFICULTY_RANK[a.difficulty] ?? 1);
+}
+
+/**
+ * Given an already-placed skeleton, group entries by the calendar day their
+ * slot starts on and return a new taskId order with each day's tasks sorted
+ * by `compareForDayOrder` (day-to-day order, and each day's total task
+ * membership, is unchanged — only the order WITHIN a day changes).
+ * `Array.prototype.sort` is stable, so ties preserve the original
+ * dependency-safe order.
+ * @param {Array<object>} skeleton
+ * @returns {string[]} taskIds in the new order
+ */
+function reorderTaskIdsByPriorityWithinDay(skeleton) {
+    const dayOrder = [];
+    const byDay = new Map();
+    for (const entry of skeleton) {
+        const key = new Date(entry.startTime).toDateString();
+        if (!byDay.has(key)) { byDay.set(key, []); dayOrder.push(key); }
+        byDay.get(key).push(entry);
+    }
+
+    const result = [];
+    for (const key of dayOrder) {
+        const dayEntries = byDay.get(key).slice().sort(compareForDayOrder);
+        result.push(...dayEntries.map((e) => e.taskId));
+    }
+    return result;
+}
+
+/**
+ * Build the deterministic candidate skeleton (see placeTasksInOrder for the
+ * placement rules), then apply Priority-Weighted Within-Day Ordering: derive
+ * which day each task landed on from that first pass, sort each day's tasks
+ * by priority/difficulty, and re-run the identical placement pass over the
+ * reordered sequence so real durations/busy-slot conflicts/day budgets are
+ * respected exactly as before — only WHICH task lands in which position
+ * within a day changes, never the total time used per day.
+ *
+ * @param {object} context
+ * @param {Array<{start:string|Date, end:string|Date}>} [busySlots]
+ * @param {number} [dailyBudgetMinutes] - max minutes of work placed per calendar day (weekdays)
+ * @param {number} [workStartHour] - start of the user's working-hours window (day/night preference)
+ * @param {number} [workEndHour] - end of the user's working-hours window (day/night preference)
+ * @param {string} [weekendMode] - 'skip' | 'light' | 'normal'
+ * @returns {Array<object>} skeleton entries
+ */
+export function buildScheduleSkeleton(context, busySlots = [], dailyBudgetMinutes = DEFAULT_DAILY_AVAILABLE_MINUTES, workStartHour = WORK_START_HOUR, workEndHour = WORK_END_HOUR, weekendMode = DEFAULT_WEEKEND_MODE) {
+    const planningTasks = context?.planning?.tasks ?? [];
+    if (planningTasks.length === 0) return [];
+
+    const estimationMap = new Map((context?.estimation?.estimations ?? []).map(e => [e.taskId, e]));
+    const taskById = new Map(planningTasks.map(t => [t.taskId, t]));
+
+    const topoOrder = context?.dependency?.topologicalOrdering;
+    const orderedTaskIds = Array.isArray(topoOrder) && topoOrder.length > 0
+        ? [
+            ...topoOrder.filter(id => taskById.has(id)),
+            ...planningTasks.map(t => t.taskId).filter(id => !topoOrder.includes(id)),
+        ]
+        : planningTasks.map(t => t.taskId);
+
+    const createdAt = new Date(context?.metadata?.createdAt ?? Date.now());
+
+    const firstPass = placeTasksInOrder(orderedTaskIds, taskById, estimationMap, createdAt, busySlots, dailyBudgetMinutes, workStartHour, workEndHour, weekendMode);
+
+    const priorityOrderedIds = reorderTaskIdsByPriorityWithinDay(firstPass);
+    const unchanged = priorityOrderedIds.length === orderedTaskIds.length
+        && priorityOrderedIds.every((id, i) => id === orderedTaskIds[i]);
+    if (unchanged) return firstPass;
+
+    const secondPass = placeTasksInOrder(priorityOrderedIds, taskById, estimationMap, createdAt, busySlots, dailyBudgetMinutes, workStartHour, workEndHour, weekendMode);
+
+    // Safety net: reordering by priority can, in rare cases (e.g. a busy-slot
+    // gap only one of two candidate tasks fits into), push a task across a
+    // dependency edge the original topological order respected.
+    // fixDependencyViolations() deterministically repairs any such case.
+    const { scheduledTasks: fixed } = fixDependencyViolations(secondPass);
+    return fixed;
 }
 
 /**

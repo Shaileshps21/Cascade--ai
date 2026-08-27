@@ -39,6 +39,7 @@ import { createAgentLog, completeAgentLog, attachToContext } from '../shared/log
 import { runSchedulerAgent, FIRST_TASK_DELAY_MINUTES } from '../scheduler_agent/agent.js';
 import { getFreeBusy, deleteCalendarEvents, syncScheduleToCalendar } from '../google_calendar_agent/agent.js';
 import { recordBenchmarkSnapshot } from '../evaluation_benchmark_agent/agent.js';
+import { getCrossProjectBusySlots } from '../shared/crossProjectBusySlots.js';
 
 const AGENT_NAME = 'replanning_agent';
 // No distinct SSE agent name exists for replanning in the plan's agent list —
@@ -281,7 +282,14 @@ async function rescheduleAffectedTasks(context, clients, affectedTaskIds, delaye
     let busySlots = [];
     try {
         const farFuture = new Date(anchor.getTime() + 30 * 24 * 3_600_000);
-        busySlots = await getFreeBusy(context.userId, anchor.toISOString(), farFuture.toISOString());
+        // Cross-Project Conflict Detection (suggestions.md #25) applies here
+        // too — a replan that fills a gap shouldn't land on top of a slot
+        // another active project already claimed.
+        const [calendarBusy, crossProjectBusy] = await Promise.all([
+            getFreeBusy(context.userId, anchor.toISOString(), farFuture.toISOString()),
+            getCrossProjectBusySlots(context.userId, context.taskId),
+        ]);
+        busySlots = [...calendarBusy, ...crossProjectBusy];
     } catch (err) {
         warnings.push(`Could not fetch calendar free/busy for replanning (non-fatal): ${err?.message?.slice(0, 150)}`);
     }

@@ -74,6 +74,50 @@ test('reopening a completed step clears its completion trail', () => {
     assert.equal(task.progress.status, 'not_started');
 });
 
+// ── Explicit actualMinutes override (suggestions.md #5 — focus timer) ───────
+
+test('an explicit actualMinutes takes precedence over the timestamp-derived duration', () => {
+    const step = makeStep({ status: 'in_progress', startedAt: T0 });
+    const task = makeTask([step]);
+    // Wall-clock span is 45 min, but the focus timer (which excludes paused
+    // time) measured only 20 min of real focus.
+    const result = applyStepUpdate(task, step, { status: 'completed', actualMinutes: 20 }, at(45));
+
+    assert.equal(step.actualMinutes, 20);
+    assert.equal(result.actualMinutes, 20);
+    assert.equal(result.isComplete, true);
+});
+
+test('an explicit actualMinutes also applies on the straight-to-completed path', () => {
+    const step = makeStep(); // never started — no timestamps to derive from
+    const task = makeTask([step]);
+    const result = applyStepUpdate(task, step, { status: 'completed', actualMinutes: 12.4 }, at(45));
+
+    assert.equal(step.actualMinutes, 12, 'rounded to the nearest minute');
+    assert.equal(result.isComplete, true);
+});
+
+test('a non-positive or implausibly large actualMinutes is ignored, falling back to the timestamp derivation', () => {
+    const step = makeStep({ status: 'in_progress', startedAt: T0 });
+    const task = makeTask([step]);
+
+    const zero = applyStepUpdate(makeTask([step]), step, { status: 'completed', actualMinutes: 0 }, at(45));
+    assert.equal(zero.actualMinutes, 45);
+
+    step.status = 'in_progress'; step.completedAt = null; step.actualMinutes = null;
+    const tooLarge = applyStepUpdate(task, step, { status: 'completed', actualMinutes: 999999 }, at(45));
+    assert.equal(tooLarge.actualMinutes, 45);
+});
+
+test('actualMinutes is ignored when the patch does not also complete the step', () => {
+    const step = makeStep({ status: 'in_progress', startedAt: T0 });
+    const task = makeTask([step]);
+    applyStepUpdate(task, step, { notes: 'still working', actualMinutes: 20 }, at(10));
+
+    assert.equal(step.actualMinutes, undefined, 'actualMinutes is only ever set by a completion transition');
+    assert.equal(step.status, 'in_progress');
+});
+
 // ── Blocking ────────────────────────────────────────────────────────────────
 
 test('blocking records the reason and timestamp', () => {

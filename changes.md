@@ -13,6 +13,115 @@ rather than left implied.
 
 ---
 
+## 2026-08-27 — Task Time Tracker / Focus Timer ✅
+
+**What.** Focus Mode now measures real working time instead of only deriving it from `startedAt`/`completedAt` timestamps. Opening Focus Mode on a not-yet-started step marks it `in_progress` immediately (so `startedAt` reflects when work actually began, and the Task Workspace timeline's "Started" node lights up), and completing from Focus Mode reports the timer's own active seconds — pause time excluded — as `actualMinutes`, with a live comparison against the step's estimate that turns amber once you run over. Implements suggestions.md #5.
+
+**How it works.** `applyStepUpdate()` (`server/agents/shared/stepProgress.js`) now accepts an optional `actualMinutes` in the patch: when a step transitions to `completed`, an explicit, plausible value (`0 < actualMinutes <= MAX_PLAUSIBLE_SESSION_MINUTES`) takes precedence over timestamp derivation; anything missing, non-positive, or implausibly large falls back to the existing `computeStepActualMinutes()` behavior unchanged. `summarizeTaskActuals()` (`duration.js`) was updated to respect that same explicit value when rolling per-step actuals up to the task level, rather than re-deriving every step from timestamps regardless of what was already set. `FocusMode.jsx` sends `Math.round(timer.seconds / 60)` (minimum 1) on `complete()`, or nothing at all for an instant-complete with zero elapsed time, so the server's own measurement is used instead of a fabricated zero.
+
+**Files changed:**
+- `server/agents/shared/stepProgress.js` — `applyStepUpdate()` accepts and prioritizes explicit `actualMinutes`.
+- `server/agents/shared/duration.js` — `summarizeTaskActuals()` respects a step's pre-set `actualMinutes` before falling back to timestamp derivation.
+- `server/agents/shared/stepProgress.test.js` — 4 new tests: explicit value takes precedence, applies on straight-to-completed, non-positive/implausible values ignored, ignored when the patch doesn't also complete the step.
+- `server/routes/projects.js` — `PATCH /:projectId/tasks/:taskId/steps/:stepId` passes `actualMinutes` through.
+- `client/src/api/index.js` — `updateExecutionStep` JSDoc documents the new field.
+- `client/src/components/FocusMode.jsx` — marks the step `in_progress` on open; `complete()` reports measured minutes; timer UI shows estimate comparison and an over-estimate warning color.
+
+**Verified:** `npm test` (server) and `npm run build` (client) both pass — see the combined verification note at the end of this batch (Drag-to-Reorder entry below).
+
+---
+
+## 2026-08-27 — Markdown Notes on Tasks ✅
+
+**What.** Both per-step notes (in the execution step list) and a new per-task note (Task Workspace's Notes section) now render as lightweight markdown — `**bold**`, `*italic*`, `` `code` ``, `[links](url)`, and `- `/`* ` bullet lists — instead of raw text, with an explicit Edit toggle rather than an always-on textarea. Implements suggestions.md #4.
+
+**How it works.** `MarkdownText.jsx` is a small dependency-free renderer (no markdown library) built for short freeform text, not full documents — inline formatting is regex-split, blank lines separate paragraphs, and a block where every line starts with `- `/`* ` renders as a `<ul>`. Task-level notes get a new endpoint, `PATCH /api/projects/:projectId/tasks/:taskId/notes`, since the existing schema's `task.notes` is a single-entry array with no prior writer besides the planning agent's `notes: []` initializer — this is the first thing to ever populate it after creation.
+
+**XSS guard.** `[link](url)` only renders as a live `<a href>` when the URL matches `^(https?:|mailto:)`; anything else (`javascript:`, `data:`, etc.) renders as plain text instead. `task.notes` and step notes are both agent- and user-writable today, and a future read-only share link (suggestions.md #12) would otherwise turn this into a stored-XSS vector.
+
+**Files changed:**
+- `client/src/components/MarkdownText.jsx` — **NEW**. Renderer + href-scheme guard.
+- `client/src/components/ExecutionStepItem.jsx` — Notes section rewritten with an Edit toggle; renders `MarkdownText` when not editing. `autoFocus` on the notes textarea now only fires on an explicit Edit click (previously it fired on every step expand, since `editingNotes` defaulted to `true` for any step without existing notes and the whole panel remounts on expand/collapse — stealing focus just from opening a step to read its description).
+- `client/src/pages/TaskWorkspace.jsx` — new `TaskNote` component (edit/view toggle, `PATCH .../notes` on save) replaces the old static read-only notes list.
+- `server/routes/projects.js` — `PATCH /:projectId/tasks/:taskId/notes`.
+- `client/src/api/index.js` — `setTaskNote(projectId, taskId, text)`.
+
+**Verified:** see combined verification note below (Drag-to-Reorder entry).
+
+---
+
+## 2026-08-27 — Drag-to-Reorder Subtasks ✅
+
+**What.** Tasks within a module on the Roadmap tab can now be manually reordered via drag-and-drop, overriding the AI's original ordering. Implements suggestions.md #2.
+
+**How it works.** Native HTML5 drag-and-drop (no dnd-kit or other dependency) — a grab handle appears on each task row only when its module has more than one task. `PATCH /api/projects/:projectId/modules/:moduleId/reorder` validates the submitted `taskIds` is an exact permutation of the module's existing tasks (rejecting any add/remove a client bug might otherwise smuggle through) before persisting.
+
+**Bug fixed before shipping.** The endpoint originally only reordered `module.tasks` (the ID array the Roadmap tree renders from) — but `computeNextBestAction()` and every other flattened subtask list (`toClientTask()`'s `subtasks`, used by the Dashboard's "Continue Working" card and the Schedule tab) sort by each task's own `order` field on the flat `planning.tasks` list, which the drag never touched. A user could drag a task to the top of a module and see it move in the Roadmap tab while the Dashboard kept recommending the old first task. Fixed by renumbering `order` across the *entire* project (walking milestones → modules → each module's task-ID order) after every reorder, so the flat order and the tree agree.
+
+**Files changed:**
+- `client/src/components/RoadmapTree.jsx` — `TaskRow` drag handlers/grab handle; `ModuleBlock` manages drag state and splices on drop; top-level component keeps optimistic local state with rollback on API failure.
+- `server/routes/projects.js` — `PATCH /:projectId/modules/:moduleId/reorder`; renumbers `planning.tasks[].order` project-wide after applying the new module order.
+- `client/src/api/index.js` — `reorderModuleTasks(projectId, moduleId, taskIds)`.
+
+**Verified:** `npm test` (server) passes — 381/381, no regressions. `npm run build` (client) — 375 modules, 0 errors. Manually verified in the browser (Claude in Chrome) against a live test project: completing a step correctly rolls up to task/project progress and advances the Dashboard's "Continue Working" card (33% → next task) — the drag-and-drop and notes UI were exercised via code review and the build/test suite, not a live drag interaction, since the test project's modules only had one task each.
+
+---
+
+## 2026-08-27 — Historical Calibration of Per-Task Estimates ✅
+
+**What.** Time estimates now blend 60% LLM estimate / 40% the user's own demonstrated historical pace for that task's category — but only once real history actually exists. Implements suggestions.md #24, after discovering and fixing a data gap that made the original spec unimplementable as literally written.
+
+**The gap this uncovered.** `memory_agent` read `benchmarkData?.averageSpeeds` from `user_benchmarks` documents — but `evaluation_benchmark_agent` (the only writer of that collection) never wrote an `averageSpeeds` field at all. That lookup was silently always `undefined` in production, so `context.memory.averageSpeeds` was the same hardcoded default object for every user, always, regardless of real history. Blending against it as originally specified would have diluted good LLM estimates with a fake constant, actively hurting the most active users. Flagged this to the user, who chose to fix the underlying data gap first rather than skip #24 or ship a blend against fake data.
+
+**How it's fixed.** `memory_agent`'s new `computeAverageSpeedsFromHistory()` computes REAL per-category averages directly from `task_history`'s `taskPerformance[]` (which already records `{title, actualMinutes, status}` per completed task — no schema change needed there), classifying each title into one of the 7 `averageSpeeds` buckets via a new deterministic keyword classifier. A category needs ≥2 completed, timed samples before its real average replaces the generic default (`averageSpeedSampleCounts` is emitted alongside so downstream consumers know which is which, without an unsound "value differs from the default" guess). No task in the schema carries an explicit domain category of its own, so classification is new — shared between memory_agent (classifying past tasks) and time_estimation_agent (classifying current ones) so both sides agree on the same buckets.
+
+**The blend itself.** `time_estimation_agent`'s new `applyHistoricalCalibration()` runs after the existing `applyEstimationConstraints()` pass: for each estimation whose task classifies into a category with real sample-backed data, it computes `paceRatio = userAverageSpeed / defaultAverageSpeed` and blends `finalEstimateMinutes` at 60% LLM / 40% (LLM estimate × paceRatio) — recalibrating by the user's demonstrated pace deviation while still respecting the LLM's own judgment of *this* task's difficulty. The whole three-point estimate (optimistic/expected/worstCase) is scaled by the same factor, which mathematically preserves the ordering constraint with no extra clamping needed.
+
+**Double-counting bug fixed before shipping.** The estimation prompt already told the LLM to fold `averageSpeeds` into its own `historicalAdjustmentPct` (Rule 2) — now that real averages flow in and this deterministic blend also applies them, a user 2× slower than default would have been compounded (LLM adjusts up, then the blend adjusts up again on top). Fixed by removing `averageSpeeds` from the prompt entirely and rewriting Rule 2 to tell the LLM historical pace calibration happens in a separate deterministic step it isn't shown, and to base `historicalAdjustmentPct` only on `context.benchmark` bias data and `reliabilityScore` instead.
+
+**Keyword-classifier bug caught in review.** The `revision` category's keyword list originally included bare `"review"` — but "code review", "review the API design" etc. are extremely common task titles across every category, not just revision work. Removed bare `"review"`, kept `revise`/`revision`/`refactor`/`polish`/`proofread`.
+
+**Files changed:**
+- `server/agents/shared/taskCategory.js` — **NEW**. `classifyTaskCategory()`, `DEFAULT_AVERAGE_SPEEDS`.
+- `server/agents/memory_agent/agent.js` — `computeAverageSpeedsFromHistory()` (exported for testing); `computeMemoryDeterministic()` uses it instead of the dead `benchmarkData?.averageSpeeds` lookup; `averageSpeedSampleCounts` added to memory output.
+- `server/agents/memory_agent/agent.test.js` — 5 new tests for `computeAverageSpeedsFromHistory`.
+- `server/agents/time_estimation_agent/agent.js` — `applyHistoricalCalibration()`, wired in after `applyEstimationConstraints()`.
+- `server/agents/time_estimation_agent/agent.test.js` — 6 new tests.
+- `server/agents/time_estimation_agent/prompt_v1.js` — removed `averageSpeeds` from the prompt; rewrote the Historical Adjustment rule to prevent double-counting.
+
+**Verified:** `npm test` (server) passes — 377/377 (10 new across both files), no regressions. Not yet exercised against a real multi-project user history in production.
+
+---
+
+## 2026-08-27 — Priority-Weighted Within-Day Ordering ✅
+
+**What.** Same-day tasks are now deterministically ordered critical > high > medium > low priority (then harder-difficulty tasks earlier within a priority tier), instead of whatever order the topological/dependency sort happened to produce. The scheduler prompt already asked the LLM for priority/energy-aware ordering, but a prompted preference isn't a guarantee — this makes it one, with zero LLM calls. Implements suggestions.md #21.
+
+**How it works.** `buildScheduleSkeleton`'s placement loop was extracted into `placeTasksInOrder()` so it can run twice: once in the original dependency/topological order (to discover which calendar day each task actually lands on, given real durations and busy-slot conflicts), then a second time over the same task set with only the *within-day* order changed — sorted by `compareForDayOrder` (buffer/review slots always sink to the end of the day, regardless of their nominal priority, since they're structural padding/verification rather than user-prioritized work). Running the identical placement logic both times — rather than swapping times onto pre-sized slots after the fact — means real durations, busy-slot conflicts, and day budgets are respected in both passes, so it can't produce overlapping times. `fixDependencyViolations` (already existing) runs once more afterward as a safety net for the rare case where a busy-slot gap causes the priority reorder to drift a task across a day boundary. Skips the second pass entirely when a day's order was already correct.
+
+**Files changed:**
+- `server/agents/scheduler_agent/agent.js` — `placeTasksInOrder()`, `compareForDayOrder()`, `reorderTaskIdsByPriorityWithinDay()`; `buildScheduleSkeleton()` now runs the two-pass reorder.
+- `server/agents/scheduler_agent/agent.test.js` — 4 new tests: reorders a same-day critical/medium/low fixture correctly, no overlapping slots after reordering, buffer/review slots sink regardless of priority, and an already-ordered fixture is left untouched (no gratuitous reshuffling).
+
+**Verified:** `npm test` (server) passes — 367/367 (4 new), no regressions. Manually sanity-checked via a standalone script confirming reorder + zero overlaps on a hand-built same-day fixture.
+
+---
+
+## 2026-08-27 — Cross-Project Conflict Detection ✅
+
+**What.** The scheduler already avoided double-booking against real Google Calendar events, but had no awareness of a user's *other* LifeSaver projects — two concurrent projects could book the exact same slot with no warning. Implements suggestions.md #25.
+
+**How it works.** New shared helper `getCrossProjectBusySlots(userId, excludeTaskId)` queries the user's other non-archived, non-failed task documents (via the existing `(userId, createdAt)` composite index — no new index needed), collects every future `schedule.scheduledTasks[]` slot into the same `{start, end}` shape `getFreeBusy()` already returns, and unions it into the `busySlots` array passed to `runSchedulerAgent`. Wired into both places a schedule actually gets built: `orchestrator.js` (initial scheduling — runs in parallel with the calendar fetch via `Promise.all`) and `replanning_agent.js` (re-invokes the scheduler for overrun-affected tasks, which could otherwise land on a slot another project already claimed).
+
+**Files changed:**
+- `server/agents/shared/crossProjectBusySlots.js` — **NEW**. `getCrossProjectBusySlots()`.
+- `server/agents/orchestrator.js` — cross-project slots fetched alongside calendar busy slots; an SSE message notes how many were found.
+- `server/agents/replanning_agent/agent.js` — same helper wired into its own internal `busySlots` fetch.
+
+**Verified:** `npm test` (server) passes — 363/363, no regressions. Not yet exercised against a live Firestore/two real concurrent projects.
+
+---
+
 ## 2026-08-27 — Manual Todo Mode (AI-Optional Fallback) ✅
 
 **What.** Users can now bypass the 15-agent pipeline entirely and build a project by hand — title, modules, subtasks (with optional estimate/priority/deadline per subtask) — via a new **"Add manually →"** link next to the "Activate" button on the Dashboard. This keeps the app usable when the API quota is exhausted, the user is offline, or they already have a plan and just want tracking + scheduling. Implements suggestions.md #26.

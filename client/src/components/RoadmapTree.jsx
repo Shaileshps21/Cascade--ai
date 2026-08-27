@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { reorderModuleTasks } from '../api/index.js';
 
 const RISK_DOT = { high: 'bg-rose-400', medium: 'bg-amber-400', low: 'bg-emerald-400' };
 const STATUS_LABEL = { not_started: 'Not started', in_progress: 'In progress', completed: 'Completed' };
@@ -16,23 +17,61 @@ function ProgressBar({ value, className = '' }) {
   );
 }
 
-function TaskRow({ projectId, task }) {
+// TaskRow — draggable when its module has more than one task (drag-to-
+// reorder, suggestions.md #2). Native HTML5 drag-and-drop, no dependency:
+// the row itself is the drag source, `draggable={false}` on the inner Link
+// stops the browser's own link-drag from taking over.
+function TaskRow({ projectId, task, draggable, isDragging, isDropTarget, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd }) {
   return (
-    <Link
-      to={`/projects/${projectId}/tasks/${task.id}`}
-      className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors group"
+    <div
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      className={`flex items-center rounded-lg transition-all ${isDragging ? 'opacity-40' : ''} ${isDropTarget ? 'ring-1 ring-brand-500/50 bg-brand-500/5' : ''}`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${task.status === 'completed' ? 'bg-emerald-400' : task.status === 'in_progress' ? 'bg-brand-400 animate-pulse' : 'bg-white/15'}`} />
-      <span className="text-sm text-white/70 group-hover:text-white flex-1 min-w-0 truncate">{task.title}</span>
-      <span className="text-[10px] text-white/30 capitalize hidden sm:inline">{task.difficulty}</span>
-      <span className={`text-[11px] font-medium ${STATUS_COLOR[task.status] || 'text-white/30'}`}>
-        {task.progress}%
-      </span>
-    </Link>
+      {draggable && (
+        <span
+          className="cursor-grab active:cursor-grabbing text-white/15 hover:text-white/40 pl-1.5 pr-0.5 flex-shrink-0 select-none"
+          title="Drag to reorder within this module"
+        >
+          ⠿
+        </span>
+      )}
+      <Link
+        to={`/projects/${projectId}/tasks/${task.id}`}
+        draggable={false}
+        className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors group flex-1 min-w-0"
+      >
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${task.status === 'completed' ? 'bg-emerald-400' : task.status === 'in_progress' ? 'bg-brand-400 animate-pulse' : 'bg-white/15'}`} />
+        <span className="text-sm text-white/70 group-hover:text-white flex-1 min-w-0 truncate">{task.title}</span>
+        <span className="text-[10px] text-white/30 capitalize hidden sm:inline">{task.difficulty}</span>
+        <span className={`text-[11px] font-medium ${STATUS_COLOR[task.status] || 'text-white/30'}`}>
+          {task.progress}%
+        </span>
+      </Link>
+    </div>
   );
 }
 
-function ModuleBlock({ projectId, module, isOpen, onToggle }) {
+function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks }) {
+  const [dragIndex, setDragIndex] = useState(null);
+  const [overIndex, setOverIndex] = useState(null);
+  const draggableList = module.tasks.length > 1;
+
+  const handleDrop = (dropIndex) => {
+    if (dragIndex !== null && dragIndex !== dropIndex) {
+      const reordered = [...module.tasks];
+      const [moved] = reordered.splice(dragIndex, 1);
+      reordered.splice(dropIndex, 0, moved);
+      onReorderTasks(module.id, reordered.map((t) => t.id));
+    }
+    setDragIndex(null);
+    setOverIndex(null);
+  };
+
   return (
     <div className="border border-white/5 rounded-lg overflow-hidden">
       <button
@@ -47,7 +86,21 @@ function ModuleBlock({ projectId, module, isOpen, onToggle }) {
       </button>
       {isOpen && (
         <div className="px-2 py-1.5 bg-black/10">
-          {module.tasks.map((task) => <TaskRow key={task.id} projectId={projectId} task={task} />)}
+          {module.tasks.map((task, i) => (
+            <TaskRow
+              key={task.id}
+              projectId={projectId}
+              task={task}
+              draggable={draggableList}
+              isDragging={dragIndex === i}
+              isDropTarget={overIndex === i && dragIndex !== i}
+              onDragStart={() => setDragIndex(i)}
+              onDragOver={(e) => { e.preventDefault(); setOverIndex(i); }}
+              onDragLeave={() => setOverIndex((cur) => (cur === i ? null : cur))}
+              onDrop={(e) => { e.preventDefault(); handleDrop(i); }}
+              onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -58,16 +111,44 @@ function ModuleBlock({ projectId, module, isOpen, onToggle }) {
  * RoadmapTree — Milestones → Modules → Tasks, collapsed by default,
  * expanding only what the user selects (per the plan's Roadmap tab spec).
  */
-export default function RoadmapTree({ projectId, milestones }) {
+export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
   const [openMilestone, setOpenMilestone] = useState(null);
   const [openModule, setOpenModule] = useState(null);
+  const [milestones, setMilestones] = useState(milestonesProp);
+  const [reorderError, setReorderError] = useState(null);
+
+  // Re-sync when the parent refetches (e.g. after a reschedule) — but our
+  // own optimistic reorders below own the array in between those refetches.
+  useEffect(() => { setMilestones(milestonesProp); }, [milestonesProp]);
 
   if (!milestones || milestones.length === 0) {
     return <div className="card p-8 text-center text-sm text-white/30">No roadmap generated yet.</div>;
   }
 
+  const handleReorderTasks = async (moduleId, newTaskIds) => {
+    const previous = milestones;
+    setMilestones((prev) =>
+      prev.map((m) => ({
+        ...m,
+        modules: m.modules.map((mod) =>
+          mod.id !== moduleId ? mod : { ...mod, tasks: newTaskIds.map((id) => mod.tasks.find((t) => t.id === id)) }
+        ),
+      }))
+    );
+    setReorderError(null);
+    try {
+      await reorderModuleTasks(projectId, moduleId, newTaskIds);
+    } catch (err) {
+      setMilestones(previous);
+      setReorderError(err.message || 'Failed to save the new order.');
+    }
+  };
+
   return (
     <div className="space-y-3">
+      {reorderError && (
+        <p className="text-xs text-rose-400 px-1">{reorderError}</p>
+      )}
       {milestones.map((milestone) => {
         const isOpen = openMilestone === milestone.id;
         return (
@@ -101,6 +182,7 @@ export default function RoadmapTree({ projectId, milestones }) {
                     module={module}
                     isOpen={openModule === module.id}
                     onToggle={() => setOpenModule(openModule === module.id ? null : module.id)}
+                    onReorderTasks={handleReorderTasks}
                   />
                 ))}
               </div>

@@ -15,7 +15,7 @@
  * performs no I/O of its own.
  */
 
-import { computeStepActualMinutes, summarizeTaskActuals } from './duration.js';
+import { computeStepActualMinutes, summarizeTaskActuals, MAX_PLAUSIBLE_SESSION_MINUTES } from './duration.js';
 
 export const ALLOWED_STEP_STATUSES = ['pending', 'in_progress', 'completed', 'blocked', 'skipped'];
 
@@ -25,12 +25,17 @@ export const ALLOWED_STEP_STATUSES = ['pending', 'in_progress', 'completed', 'bl
  *
  * @param {object} task - the owning task (mutated)
  * @param {object} step - the step being updated (mutated)
- * @param {{status?: string, progress?: number, notes?: string, completionEvidence?: string, blockedReason?: string}} patch
+ * @param {{status?: string, progress?: number, notes?: string, completionEvidence?: string, blockedReason?: string, actualMinutes?: number}} patch
+ *   `actualMinutes`, when provided alongside `status: 'completed'`, is a client-measured
+ *   duration (e.g. a Pomodoro-style focus timer's active seconds — suggestions.md #5) that
+ *   takes precedence over the timestamp-derived measurement below, since it excludes any
+ *   time the user paused. Ignored unless finite, positive, and within the same plausibility
+ *   cap the timestamp-derived path already enforces.
  * @param {string} [nowISO] - injected clock, so tests are deterministic
  * @returns {{actualMinutes: number|null, isComplete: boolean, taskStatus: string}}
  */
 export function applyStepUpdate(task, step, patch = {}, nowISO = new Date().toISOString()) {
-    const { status, progress, notes, completionEvidence, blockedReason } = patch;
+    const { status, progress, notes, completionEvidence, blockedReason, actualMinutes } = patch;
 
     if (status !== undefined) {
         const wasCompleted = step.status === 'completed';
@@ -41,9 +46,13 @@ export function applyStepUpdate(task, step, patch = {}, nowISO = new Date().toIS
         if (status === 'completed') {
             step.completedAt = nowISO;
             step.progress = 100;
+            const explicitMinutes = Number.isFinite(actualMinutes) && actualMinutes > 0 && actualMinutes <= MAX_PLAUSIBLE_SESSION_MINUTES
+                ? Math.round(actualMinutes)
+                : null;
             // Ground truth for estimation accuracy — null unless the step was
-            // actually started first, rather than inventing a duration.
-            step.actualMinutes = computeStepActualMinutes(step);
+            // actually started first (or the caller measured it directly),
+            // rather than inventing a duration.
+            step.actualMinutes = explicitMinutes ?? computeStepActualMinutes(step);
         } else if (wasCompleted) {
             // Reopening must clear the completion trail: a stale completedAt
             // would later pair with a fresh startedAt and yield a nonsense span.

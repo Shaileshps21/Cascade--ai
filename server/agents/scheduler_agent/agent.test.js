@@ -206,6 +206,80 @@ describe('findNextFreeSlot', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════
+// Priority-Weighted Within-Day Ordering (suggestions.md #21)
+// ═════════════════════════════════════════════════════════════════════════
+describe('buildScheduleSkeleton — priority-weighted within-day ordering', () => {
+    test('reorders same-day, dependency-free tasks critical > high > medium > low', () => {
+        const createdAt = new Date(2026, 6, 16, 9, 0, 0);
+        const context = makeContext({
+            createdAt,
+            deadline: new Date(2026, 7, 1),
+            tasks: [
+                { taskId: 'T1', title: 'Low prio', estimatedMinutes: 20, difficulty: 'low', priority: 'low', dependencies: [] },
+                { taskId: 'T2', title: 'Critical', estimatedMinutes: 20, difficulty: 'high', priority: 'critical', dependencies: [] },
+                { taskId: 'T3', title: 'Medium', estimatedMinutes: 20, difficulty: 'medium', priority: 'medium', dependencies: [] },
+            ],
+            estimations: [],
+            topologicalOrdering: ['T1', 'T2', 'T3'],
+        });
+
+        const skeleton = buildScheduleSkeleton(context, [], 120, 9, 21, 'skip');
+
+        assert.deepEqual(skeleton.map((s) => s.taskId), ['T2', 'T3', 'T1']);
+    });
+
+    test('never produces overlapping slots after reordering', () => {
+        const createdAt = new Date(2026, 6, 16, 9, 0, 0);
+        const context = makeContext({
+            createdAt,
+            deadline: new Date(2026, 7, 1),
+            tasks: [
+                { taskId: 'T1', title: 'Low', estimatedMinutes: 45, difficulty: 'low', priority: 'low', dependencies: [] },
+                { taskId: 'T2', title: 'Critical', estimatedMinutes: 45, difficulty: 'high', priority: 'critical', dependencies: [] },
+                { taskId: 'T3', title: 'Medium', estimatedMinutes: 45, difficulty: 'medium', priority: 'medium', dependencies: [] },
+                { taskId: 'T4', title: 'High', estimatedMinutes: 45, difficulty: 'high', priority: 'high', dependencies: [] },
+            ],
+            estimations: [],
+            topologicalOrdering: ['T1', 'T2', 'T3', 'T4'],
+        });
+
+        const skeleton = buildScheduleSkeleton(context, [], 180, 9, 21, 'skip');
+        const sorted = [...skeleton].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+        for (let i = 1; i < sorted.length; i++) {
+            assert.ok(
+                new Date(sorted[i].startTime).getTime() >= new Date(sorted[i - 1].endTime).getTime(),
+                `expected ${sorted[i].taskId} to start at/after ${sorted[i - 1].taskId} ends`
+            );
+        }
+    });
+
+    test('sinks buffer/review slots to the end of the day regardless of priority', () => {
+        const createdAt = new Date(2026, 6, 16, 9, 0, 0);
+        const context = makeContext({
+            createdAt,
+            deadline: new Date(2026, 7, 1),
+            tasks: [
+                { taskId: 'BUF1', title: 'Buffer', estimatedMinutes: 15, difficulty: 'low', priority: 'critical', dependencies: [], isBuffer: true },
+                { taskId: 'T1', title: 'Medium work', estimatedMinutes: 20, difficulty: 'medium', priority: 'medium', dependencies: [] },
+            ],
+            estimations: [],
+            topologicalOrdering: ['BUF1', 'T1'],
+        });
+
+        const skeleton = buildScheduleSkeleton(context, [], 120, 9, 21, 'skip');
+        assert.deepEqual(skeleton.map((s) => s.taskId), ['T1', 'BUF1']);
+    });
+
+    test('leaves already priority-ordered days untouched (no gratuitous reshuffling)', () => {
+        const createdAt = new Date(2026, 6, 16, 9, 0, 0);
+        // Default fixture is already critical/high -> medium -> low in topo order.
+        const context = makeContext({ createdAt, deadline: new Date(2026, 7, 1) });
+        const skeleton = buildScheduleSkeleton(context, []);
+        assert.deepEqual(skeleton.map((s) => s.taskId), ['T1', 'T2', 'T3']);
+    });
+});
+
+// ═════════════════════════════════════════════════════════════════════════
 // buildScheduleSkeleton / enforceFirstTaskDelay — Rule 1 (30-min start delay)
 // ═════════════════════════════════════════════════════════════════════════
 describe('Rule 1 — first task starts ~30 minutes after project creation', () => {

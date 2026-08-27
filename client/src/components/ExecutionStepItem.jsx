@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import ResourceLink from './ResourceLink.jsx';
+import MarkdownText from './MarkdownText.jsx';
 
 const STATUS_META = {
   pending: { label: 'Pending', dot: 'bg-white/20', text: 'text-white/40' },
@@ -20,7 +21,9 @@ const STATUS_META = {
 export default function ExecutionStepItem({ step, onUpdate }) {
   const [expanded, setExpanded] = useState(false);
   const [notes, setNotes] = useState(step.notes ?? '');
+  const [editingNotes, setEditingNotes] = useState(!step.notes);
   const [busy, setBusy] = useState(false);
+  const [focusNotes, setFocusNotes] = useState(false);
   const meta = STATUS_META[step.status] || STATUS_META.pending;
 
   const run = async (patch) => {
@@ -40,6 +43,8 @@ export default function ExecutionStepItem({ step, onUpdate }) {
 
   const saveNotes = () => {
     if (notes !== (step.notes ?? '')) run({ notes });
+    setEditingNotes(false);
+    setFocusNotes(false);
   };
 
   return (
@@ -128,17 +133,29 @@ export default function ExecutionStepItem({ step, onUpdate }) {
             )}
           </div>
 
-          {/* Notes */}
+          {/* Notes — markdown supported (suggestions.md #4) */}
           <div>
-            <p className="text-[11px] text-white/30 uppercase tracking-wide font-semibold mb-1">Notes</p>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              onBlur={saveNotes}
-              placeholder="Add a note for this step..."
-              rows={2}
-              className="input-field text-xs py-2"
-            />
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[11px] text-white/30 uppercase tracking-wide font-semibold">Notes</p>
+              {!editingNotes && (
+                <button onClick={() => { setEditingNotes(true); setFocusNotes(true); }} className="text-[11px] text-brand-400 hover:text-brand-300">
+                  Edit
+                </button>
+              )}
+            </div>
+            {editingNotes ? (
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                onBlur={saveNotes}
+                placeholder="Add a note for this step... (markdown: **bold**, *italic*, `code`, [link](url), - list)"
+                rows={2}
+                autoFocus={focusNotes}
+                className="input-field text-xs py-2"
+              />
+            ) : (
+              <MarkdownText text={notes} className="text-xs text-white/60 leading-relaxed" />
+            )}
           </div>
         </div>
       )}

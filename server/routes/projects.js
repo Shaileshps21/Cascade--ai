@@ -170,7 +170,7 @@ router.get('/:projectId/tasks/:taskId', requireAuth, async (req, res) => {
 // be re-derived from it on the next read (single source of truth: the steps).
 router.patch('/:projectId/tasks/:taskId/steps/:stepId', requireAuth, async (req, res) => {
     const { projectId, taskId, stepId } = req.params;
-    const { status, progress, notes, completionEvidence, blockedReason } = req.body ?? {};
+    const { status, progress, notes, completionEvidence, blockedReason, actualMinutes } = req.body ?? {};
 
     if (status !== undefined && !ALLOWED_STEP_STATUSES.includes(status)) {
         return res.status(400).json({ error: `status must be one of: ${ALLOWED_STEP_STATUSES.join(', ')}` });
@@ -191,7 +191,7 @@ router.patch('/:projectId/tasks/:taskId/steps/:stepId', requireAuth, async (req,
 
         // Status transitions, the completion trail and the actual-effort rollup
         // all live in applyStepUpdate() so they can be tested without Firestore.
-        applyStepUpdate(task, step, { status, progress, notes, completionEvidence, blockedReason }, nowISO);
+        applyStepUpdate(task, step, { status, progress, notes, completionEvidence, blockedReason, actualMinutes }, nowISO);
 
         context.metadata.updatedAt = nowISO;
         await doc.ref.set(toFirestoreDocument(context));
@@ -202,6 +202,101 @@ router.patch('/:projectId/tasks/:taskId/steps/:stepId', requireAuth, async (req,
     } catch (err) {
         console.error('[Step PATCH]', err);
         res.status(500).json({ error: 'Failed to update execution step' });
+    }
+});
+
+// ── PATCH /api/projects/:projectId/tasks/:taskId/notes ──────────────────────
+// Sets a single free-text markdown note on a task — separate from per-step
+// notes and from completionEvidence (suggestions.md #4).
+router.patch('/:projectId/tasks/:taskId/notes', requireAuth, async (req, res) => {
+    const { projectId, taskId } = req.params;
+    const { text } = req.body ?? {};
+
+    if (typeof text !== 'string') {
+        return res.status(400).json({ error: '`text` (string) is required.' });
+    }
+
+    try {
+        const found = await loadOwnedContext(projectId, req.user.uid);
+        if (!found) return res.status(404).json({ error: 'Project not found' });
+        const { doc, context } = found;
+
+        const task = (context.planning?.tasks ?? []).find((t) => t.taskId === taskId);
+        if (!task) return res.status(404).json({ error: 'Task not found' });
+
+        // Single-note-per-task model: stored as a one-element array so it
+        // stays compatible with every existing reader of task.notes (an
+        // array), which currently only ever holds AI-authored strings.
+        task.notes = text.trim() ? [text] : [];
+        context.metadata.updatedAt = new Date().toISOString();
+        await doc.ref.set(toFirestoreDocument(context));
+
+        const flat = toClientTask(context);
+        res.json({ success: true, task: flat.subtasks.find((t) => t.id === taskId) });
+    } catch (err) {
+        console.error('[Task Notes PATCH]', err);
+        res.status(500).json({ error: 'Failed to update task note' });
+    }
+});
+
+// ── PATCH /api/projects/:projectId/modules/:moduleId/reorder ────────────────
+// Persists a new task order within one module (suggestions.md #2 —
+// drag-to-reorder). The AI decides task order today; this lets the user
+// override it without re-submitting the whole project. Reordering only —
+// the taskIds sent must be an exact permutation of the module's existing
+// tasks, never an add/remove, so a client bug can't silently corrupt it.
+router.patch('/:projectId/modules/:moduleId/reorder', requireAuth, async (req, res) => {
+    const { projectId, moduleId } = req.params;
+    const { taskIds } = req.body ?? {};
+
+    if (!Array.isArray(taskIds) || taskIds.some((id) => typeof id !== 'string')) {
+        return res.status(400).json({ error: '`taskIds` must be an array of strings.' });
+    }
+
+    try {
+        const found = await loadOwnedContext(projectId, req.user.uid);
+        if (!found) return res.status(404).json({ error: 'Project not found' });
+        const { doc, context } = found;
+
+        let targetModule = null;
+        for (const milestone of context.planning?.milestones ?? []) {
+            const mod = (milestone.modules ?? []).find((m) => m.id === moduleId);
+            if (mod) { targetModule = mod; break; }
+        }
+        if (!targetModule) return res.status(404).json({ error: 'Module not found' });
+
+        const currentSet = new Set(targetModule.tasks ?? []);
+        const newSet = new Set(taskIds);
+        const isSamePermutation = currentSet.size === newSet.size && [...currentSet].every((id) => newSet.has(id));
+        if (!isSamePermutation) {
+            return res.status(400).json({ error: "taskIds must be a reordering of the module's existing tasks — no additions or removals." });
+        }
+
+        targetModule.tasks = taskIds;
+
+        // toClientTask() sorts the flat subtask list (Dashboard's "next best
+        // action", Schedule tab, etc.) by task.order, not by position in
+        // module.tasks — renumber every task's order to match the tree so
+        // the drag actually changes what those views show, not just the
+        // Roadmap tab's own rendering of this module.
+        const tasksById = new Map((context.planning.tasks ?? []).map((t) => [t.taskId, t]));
+        let order = 1;
+        for (const milestone of context.planning?.milestones ?? []) {
+            for (const mod of milestone.modules ?? []) {
+                for (const taskId of mod.tasks ?? []) {
+                    const task = tasksById.get(taskId);
+                    if (task) task.order = order++;
+                }
+            }
+        }
+
+        context.metadata.updatedAt = new Date().toISOString();
+        await doc.ref.set(toFirestoreDocument(context));
+
+        res.json({ success: true, project: withHealth(context) });
+    } catch (err) {
+        console.error('[Module Reorder PATCH]', err);
+        res.status(500).json({ error: 'Failed to reorder module tasks' });
     }
 });
 

@@ -86,12 +86,29 @@ export const getProjectTask = (projectId, taskId) =>
  * @param {string} projectId
  * @param {string} taskId
  * @param {string} stepId
- * @param {{status?: string, progress?: number, notes?: string, completionEvidence?: string, blockedReason?: string}} patch
+ * @param {{status?: string, progress?: number, notes?: string, completionEvidence?: string, blockedReason?: string, actualMinutes?: number}} patch
+ *   `actualMinutes` is only honored alongside `status: 'completed'` — a client-measured
+ *   duration (e.g. the Focus Mode timer) that takes precedence over the server's own
+ *   timestamp-derived measurement.
  */
 export const updateExecutionStep = (projectId, taskId, stepId, patch) =>
   apiFetch(`/api/projects/${projectId}/tasks/${taskId}/steps/${stepId}`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
+  });
+
+// Set (replace) a task's single free-text markdown note.
+export const setTaskNote = (projectId, taskId, text) =>
+  apiFetch(`/api/projects/${projectId}/tasks/${taskId}/notes`, {
+    method: 'PATCH',
+    body: JSON.stringify({ text }),
+  });
+
+// Persist a new task order within one module (drag-to-reorder).
+export const reorderModuleTasks = (projectId, moduleId, taskIds) =>
+  apiFetch(`/api/projects/${projectId}/modules/${moduleId}/reorder`, {
+    method: 'PATCH',
+    body: JSON.stringify({ taskIds }),
   });
 
 // ── Calendar ──────────────────────────────────────────────────────────────────

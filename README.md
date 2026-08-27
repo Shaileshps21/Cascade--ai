@@ -1,8 +1,8 @@
-# ⚡ LifeSaver — AI-Powered Deadline Companion
+# ⚡ Cascade — AI Productivity Companion
 
 > *"Don't miss deadlines. Let agents handle it."*
 
-A multi-agent AI productivity system that turns a plain-English goal into a fully planned, prioritized, scheduled, and continuously self-correcting project — powered by a 15-agent pipeline, your choice of Groq or Gemini as the LLM provider, and Google Calendar auto-scheduling.
+A multi-agent AI productivity system that turns a plain-English goal into a fully planned, prioritized, scheduled, and continuously self-correcting project — powered by a 15-agent pipeline, your choice of Groq or Gemini as the LLM provider, and Google Calendar auto-scheduling. When the AI pipeline isn't wanted or available, **Manual Todo Mode** builds the same tracked, schedulable project by hand instead — see [Key Features](#-key-features) below.
 
 ---
 
@@ -39,6 +39,8 @@ Your Input (natural language)
 
 The **Memory Agent** reads `task_history` and `user_benchmarks` for the signed-in user and builds a profile (past similar projects, success rate, common failure patterns, optimal work hours) that downstream agents (Time Estimation, Scheduler) read from `context.memory`. With fewer than 5 past projects it falls back to an LLM-generated starting profile instead.
 
+Once a user has completed at least 2 timed tasks in a category (coding, writing, research, design, debugging, revision, reading), the **Time Estimation Agent** blends its own LLM estimate with that user's real demonstrated pace for the category — 60% LLM judgment of *this* task's difficulty, 40% the user's measured speed deviation from the average. Below that sample threshold, estimates are LLM-only; there's no fake data blended in as a placeholder.
+
 The **Evaluation Benchmark Agent** is purely deterministic (no LLM calls) — it scores every run across 7 categories (planning quality, scheduling accuracy, dependency health, estimation accuracy, knowledge quality, calendar reliability, productivity) and appends a snapshot after every pipeline run and every task completion, so the system's own quality is trackable over time.
 
 ---
@@ -61,7 +63,7 @@ The **Evaluation Benchmark Agent** is purely deterministic (no LLM calls) — it
 ## 📁 Project Structure
 
 ```
-last-minute-lifesaver/
+cascade/
 ├── server/
 │   ├── index.js                          # Express server + cron (progress sweep, briefing)
 │   ├── config/
@@ -86,13 +88,14 @@ last-minute-lifesaver/
 │   │   ├── replanning_agent/             # Reassigns missed/overrun tasks, re-syncs calendar
 │   │   ├── evaluation_benchmark_agent/   # 7-category deterministic quality scoring
 │   │   ├── briefing_agent/               # Daily morning briefing
-│   │   ├── shared/                       # agentRunner, validator, logger, firestoreUtil
+│   │   ├── shared/                       # agentRunner, validator, logger, firestoreUtil,
+│   │   │                                 # crossProjectBusySlots, taskCategory (pace classifier)
 │   │   └── *_legacy.js                   # Superseded flat-schema agents, kept for reference
 │   ├── routes/
-│   │   ├── tasks.js                      # initiate / stream / complete / delete / replan
-│   │   ├── projects.js                   # Project Workspace read/write surface
+│   │   ├── tasks.js                      # initiate / manual / stream / complete / archive / replan
+│   │   ├── projects.js                   # Project Workspace read/write surface (steps, notes, reorder)
 │   │   ├── calendar.js                   # OAuth flow + events
-│   │   ├── settings.js                   # API key + scheduling preferences
+│   │   ├── settings.js                   # API key, scheduling preferences, onboarding flag
 │   │   ├── briefings.js                  # Daily briefing endpoints
 │   │   └── auth.js                       # Token verification + profile
 │   └── middleware/auth.js                # Firebase token verification
@@ -100,23 +103,27 @@ last-minute-lifesaver/
 ├── client/src/
 │   ├── App.jsx                           # Router + auth guard
 │   ├── api/index.js                      # Typed API client
-│   ├── context/AuthContext.jsx           # Firebase auth state
+│   ├── context/AuthContext.jsx           # Firebase auth state + "switch account" flow
 │   ├── hooks/useSSE.js                   # EventSource lifecycle hook
 │   ├── pages/
 │   │   ├── Login.jsx
+│   │   ├── ManualProjectBuilder.jsx      # AI-optional: hand-build a project's modules/subtasks
 │   │   ├── ProjectWorkspace.jsx          # Overview/Roadmap/Schedule/Resources/Analytics/Notes/Settings tabs
-│   │   └── TaskWorkspace.jsx             # Single task detail + Focus Mode
+│   │   └── TaskWorkspace.jsx             # Single task detail, markdown notes, Focus Mode
 │   └── components/
+│       ├── Onboarding.jsx                # 4-slide first-run overlay, shown once
 │       ├── Dashboard.jsx                 # Project Cards grid — the home page
-│       ├── ProjectCard.jsx               # Per-project summary + inline delete
+│       ├── ProjectCard.jsx               # Per-project summary, archive, "let AI enhance"
 │       ├── TaskInput.jsx                 # NL input → pipeline trigger
 │       ├── AgentTrace.jsx                # Live SSE agent thinking panel
 │       ├── ApiKeySetup.jsx               # Provider + model picker
 │       ├── CalendarConnect.jsx           # Google Calendar OAuth connect/disconnect
-│       ├── SchedulePreferences.jsx       # Day / Flexible / Night scheduling toggle
-│       ├── RoadmapTree.jsx               # Milestones → Modules → Tasks tree
-│       ├── ExecutionStepItem.jsx         # Interactive execution-step row
-│       ├── FocusMode.jsx                 # Distraction-free "Start Working" view
+│       ├── CalendarSyncToggle.jsx        # Per-project calendar sync on/off
+│       ├── SchedulePreferences.jsx       # Working-hours window, weekend mode, daily capacity
+│       ├── RoadmapTree.jsx               # Milestones → Modules → Tasks tree, drag-to-reorder
+│       ├── ExecutionStepItem.jsx         # Interactive execution-step row, markdown notes
+│       ├── MarkdownText.jsx              # Dependency-free renderer for task/step notes
+│       ├── FocusMode.jsx                 # Distraction-free "Start Working" view + focus timer
 │       ├── NextBestAction.jsx            # Continue-working suggestion card
 │       ├── ResourceLink.jsx              # Renders a resource; inert text if no confident URL
 │       ├── RiskMeter.jsx                 # Animated arc gauge (0–100)
@@ -177,8 +184,8 @@ Natural Language Task
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/last-minute-lifesaver.git
-cd last-minute-lifesaver
+git clone https://github.com/YOUR_USERNAME/cascade.git
+cd cascade
 
 # Install backend
 cd server && npm install
@@ -284,7 +291,7 @@ Open [http://localhost:5173](http://localhost:5173)
 cd server && npm test
 ```
 
-**293 tests, all passing.** They run on Node's built-in test runner (`node --test`,
+**381 tests, all passing.** They run on Node's built-in test runner (`node --test`,
 no test framework dependency) and are fully hermetic — every agent's pure logic is
 covered without touching the network, Firestore, or an LLM, so the suite needs no
 `.env` and no API key to run.
@@ -339,14 +346,26 @@ firebase deploy --only firestore:rules,firestore:indexes
 | Feature | Description |
 |---|---|
 | **Natural Language Input** | Type tasks exactly as you'd say them |
+| **Manual Todo Mode** | Bypass the 15-agent pipeline entirely and hand-build a project (title, modules, subtasks) via **"Add manually →"** — stays usable offline or when the API quota is exhausted, with a one-click **"Let AI enhance this"** upgrade path once you're ready |
+| **First-Run Onboarding** | A 4-slide overlay walks brand-new users through the pipeline, Calendar sync, and quick-start tips — shown once, never again after dismissal |
 | **Live Agent Trace** | Watch each of the 15 agents think in real-time (SSE streaming) |
 | **Bring Your Own Key** | Use the shared quota, or add a personal Groq/Gemini key and pick the exact model |
 | **Verified Resource Links** | Every learning resource URL is actually checked (HEAD/GET) before being shown — dead or hallucinated links are blanked instead of shipped |
 | **Day/Night Scheduling Preference** | Choose whether new tasks get scheduled into an early (7–19), balanced (9–21), or late/night (12–24) working-hours window |
+| **Weekend Scheduling Modes** | Four presets — skip weekends, light (50%), full parity, or weekend-heavy (150%, for users whose main work time *is* the weekend) |
+| **User-Defined Daily Capacity** | A 0.5–12h/day stepper replaces the old one-size-fits-all 2h/day assumption, feeding both the scheduler and its feasibility checks |
 | **Calendar-Aware Scheduling** | The scheduler reads your real Google Calendar free/busy blocks and places tasks around your existing commitments |
+| **Cross-Project Conflict Detection** | The scheduler also checks your *other* Cascade projects' scheduled slots, so two concurrent projects can't silently double-book the same hour |
+| **Priority-Weighted Within-Day Ordering** | Same-day tasks are deterministically ordered critical → high → medium → low (buffer/review always last), not left to whatever order the dependency sort produced |
+| **Historical Pace Calibration** | Time estimates blend the LLM's judgment with your own demonstrated speed per task category, once enough completed history exists |
+| **Per-Project Calendar Sync Toggle** | Opt individual projects in or out of Google Calendar syncing, independent of the global connection |
 | **Automatic Missed-Task Reassignment** | A 30-minute sweep detects overrun/at-risk tasks and automatically reschedules them, re-syncing Google Calendar — no manual intervention needed (a manual "Reschedule now" button is also available) |
 | **Project Workspace** | Dashboard → Project Workspace → Task Workspace navigation with Overview, Roadmap, Schedule, Resources, Analytics, Notes and Settings tabs |
-| **One-Click Delete** | Remove a mistakenly-added project directly from the home page, no drill-down required |
+| **Drag-to-Reorder Subtasks** | Manually override the AI's task order within a module via native drag-and-drop — the Dashboard's "Continue Working" suggestion picks it up too |
+| **Markdown Notes** | Task- and step-level notes support `**bold**`, `*italic*`, `` `code` ``, links, and bullet lists |
+| **Focus Timer** | Starting a step in Focus Mode marks it in-progress and times your actual working session; completing it reports real elapsed minutes instead of only deriving duration from timestamps |
+| **Switch Google Account** | A one-click "Use a different Google account" flow on the login page, no sign-out detour required |
+| **Archive (Soft-Delete)** | Removing a project from the Dashboard preserves its Firestore history for the Memory Agent instead of hard-deleting it |
 | **Risk Score (0–100)** | Live, recalculated score per project from the gap between time-elapsed and work-completed |
 | **Deterministic Feasibility Gate** | A hard deadline is checked against real available capacity before any LLM ever proposes a schedule — infeasible plans get an honest, task-grounded reconciliation suggestion instead of a fabricated one |
 | **7-Category Benchmarking** | Every run's planning quality, scheduling accuracy, dependency health, estimation accuracy, and more are scored and tracked over time |
@@ -416,12 +435,34 @@ Four requests, each root-caused and fixed:
 
 - **Verified:** full server suite grew from 278 to 293 passing tests (new coverage for URL verification and the day/night presets, including the midnight-boundary edge cases). Live-tested end-to-end via Chrome browser automation against a real Groq-backed pipeline run: resource URLs were correctly blanked when unreachable and kept when real; a newly-submitted task's 8 scheduled slots all landed inside the selected night-person window (12:00–19:00, none earlier); the 30-minute cron fired mid-session and automatically replanned 2 escalated tasks, deleting their stale Calendar events and creating fresh ones; the delete button removed a project via a real `200` `DELETE` response; and zero Firestore index errors appeared across the entire session (multiple pipeline runs plus cron sweeps).
 
+### 12. Weekend scheduling preference, user-defined daily capacity, per-project Calendar sync toggle, project archive, first-run onboarding, account switching, and Manual Todo Mode
+Seven features, delivered incrementally and bundled into one commit (full per-feature detail in `changes.md`):
+- **Scheduling preferences:** a 3-way weekend mode (skip/light/full) grew a 4th **weekend-heavy** option (150% budget) for users whose primary work time is the weekend; a 0.5–12h/day capacity stepper replaced the hard-coded 2h/day assumption everywhere it was used, including feasibility checks.
+- **Calendar & account UX:** each project can independently opt in/out of Google Calendar sync (`CalendarSyncToggle`); the login page gained a one-click "use a different Google account" flow that forces Google's account picker instead of silently reusing the cached session.
+- **Project archive:** the Dashboard's delete button now soft-deletes (`metadata.archived = true`) instead of permanently removing the Firestore document — Calendar events are still cleaned up, but history stays available to the Memory Agent.
+- **First-run onboarding:** a 4-slide overlay (pipeline, Calendar sync, quick-start tips) shown once to any user with zero projects, dismissal persisted to Firestore.
+- **Manual Todo Mode:** `POST /api/tasks/manual` builds a `PlanningContext` by hand with zero LLM calls, reusing the exact schema `planning_agent` produces so every existing view (Task Workspace, Roadmap, progress rollups) renders it identically to an AI-planned project. Because it's checkpointed at the same `'planning'` pipeline stage a quota-interrupted run would be, the *existing* resume/checkpoint endpoint doubles as a **"Let AI enhance this"** upgrade path with no new orchestrator code.
+- **Verified:** `npm run build` clean (374 modules) and `npm test` passing (363/363) at time of commit.
+
+### 13. Cross-project conflict detection, priority-weighted within-day ordering, and historical pace calibration
+Three scheduler improvements, aimed at the ordering and estimation quality of an already-feasible plan:
+- The scheduler now also treats a user's **other** active projects' scheduled slots as busy time, unioned with real Google Calendar free/busy — two concurrent projects can no longer silently claim the same hour.
+- Same-day task order is now deterministic — critical → high → medium → low priority, buffer/review tasks always last — computed with zero extra LLM calls via a two-pass placement (discover day assignments, then re-place with priority-sorted same-day order).
+- Time estimates now blend 60% LLM judgment / 40% the user's own demonstrated pace per task category, once ≥2 completed timed samples exist for that category. This uncovered and fixed a real data gap along the way: the field this was supposed to read (`memory.averageSpeeds` sourced from `user_benchmarks`) had never actually been written by any agent, so the original spec as written would have blended real estimates against a silently-fake constant. Fixed by computing real per-category averages from `task_history` instead, and removed a resulting double-count where the estimation prompt and the new deterministic blend would have both applied the same historical signal.
+- **Verified:** server suite grew to 377/377 passing (10 new tests across memory/time-estimation agents, 4 more for the ordering pass).
+
+### 14. Drag-to-reorder subtasks, markdown notes, and a Focus Mode timer
+- **Drag-to-reorder:** native HTML5 drag-and-drop (no added dependency) lets a user override a module's task order from the Roadmap tab; the endpoint renumbers every task's `order` project-wide (not just within the dragged module) so the Dashboard's "Continue Working" card and Schedule tab agree with what the Roadmap shows instead of silently disagreeing with it.
+- **Markdown notes:** both step-level and a new task-level note support a small dependency-free markdown renderer (`**bold**`, `` `code` ``, links, bullet lists); links only render live for `http(s):`/`mailto:` URLs — notes are agent- and user-writable, so anything else renders as plain text instead of becoming a stored-XSS vector.
+- **Focus Mode timer:** opening a step in Focus Mode marks it in-progress immediately (so `startedAt` is real); completing it reports the timer's own active seconds as `actualMinutes`, taking precedence over timestamp-derived duration, with a live over-estimate warning.
+- **Verified:** server suite at 381/381 passing; `vite build` clean (375 modules). Live-tested step completion end-to-end via Chrome browser automation against a real Firestore project — completing a step correctly rolled up to 33% task/project progress and advanced the Dashboard's next-action recommendation.
+
 ---
 
-# 💡 Why LifeSaver?
+# 💡 Why Cascade?
 
-Unlike traditional task managers, **LifeSaver acts as an intelligent productivity partner**.
+Unlike traditional task managers, **Cascade acts as an intelligent productivity partner**.
 
-It doesn't simply record tasks—it understands user intent, learns from past behavior, creates personalized execution strategies, schedules work automatically around your real calendar and your own day/night rhythm, catches itself when a task is missed, and continuously adapts plans until the goal is achieved.
+It doesn't simply record tasks—it understands user intent, learns from past behavior, creates personalized execution strategies, schedules work automatically around your real calendar, your own day/night rhythm, and your weekend availability, catches itself when a task is missed, and continuously adapts plans until the goal is achieved. And when you'd rather skip the AI entirely, Manual Todo Mode gives you the same tracked, schedulable project without it.
 
 > **From natural language → to intelligent execution → to successful completion.**

@@ -64,6 +64,13 @@ export function computeStepActualMinutes(step, maxPlausibleMinutes = MAX_PLAUSIB
  * Roll a task's execution steps up into a single actual-effort figure plus the
  * coverage needed to judge how much that figure can be trusted.
  *
+ * Each step's own `actualMinutes`, when already a finite number, is trusted
+ * as-is instead of being re-derived from timestamps — that field may hold a
+ * client-measured value (e.g. a Pomodoro-style focus timer's active seconds,
+ * which excludes paused time — suggestions.md #5) that is more accurate than
+ * the raw startedAt/completedAt span. Only falls back to the timestamp
+ * derivation when the step doesn't already carry one.
+ *
  * @param {object[]} steps
  * @param {number} [maxPlausibleMinutes]
  * @returns {{actualMinutes: number|null, measuredSteps: number, workedSteps: number, isComplete: boolean}}
@@ -80,7 +87,9 @@ export function summarizeTaskActuals(steps, maxPlausibleMinutes = MAX_PLAUSIBLE_
     let total = 0;
     let measuredSteps = 0;
     for (const step of worked) {
-        const minutes = computeStepActualMinutes(step, maxPlausibleMinutes);
+        const minutes = Number.isFinite(step?.actualMinutes)
+            ? step.actualMinutes
+            : computeStepActualMinutes(step, maxPlausibleMinutes);
         if (minutes === null) continue;
         total += minutes;
         measuredSteps++;

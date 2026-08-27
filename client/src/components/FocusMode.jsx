@@ -28,11 +28,24 @@ export default function FocusMode({ task, step, onUpdate, onClose }) {
   const [running, setRunning] = useState(true);
   const [notes, setNotes] = useState(step?.notes ?? '');
   const timer = useElapsedTimer(running);
+  const startedRef = useRef(false);
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = ''; };
   }, []);
+
+  // Pomodoro-style time tracking (suggestions.md #5): mark the step
+  // in_progress the instant focused work begins, so its startedAt is real
+  // (also lights up the Task Workspace "Started" timeline node) and the
+  // timer below reflects genuine elapsed focus time.
+  useEffect(() => {
+    if (!step || startedRef.current) return;
+    if (step.status !== 'in_progress' && step.status !== 'completed') {
+      startedRef.current = true;
+      onUpdate(step.id, { status: 'in_progress' });
+    }
+  }, [step, onUpdate]);
 
   if (!step) {
     return (
@@ -46,9 +59,19 @@ export default function FocusMode({ task, step, onUpdate, onClose }) {
   }
 
   const complete = async () => {
-    await onUpdate(step.id, { status: 'completed', notes });
+    // The timer's own active seconds (paused time excluded) is a more
+    // accurate measure of real focus than the wall-clock startedAt->now span
+    // the backend would otherwise derive — pass it through when there's
+    // anything to report. `undefined` is dropped by JSON.stringify, so an
+    // instant-complete (0 seconds) cleanly falls back to the server's own
+    // timestamp-based measurement instead of reporting a fabricated 0.
+    const measuredMinutes = timer.seconds > 0 ? Math.max(1, Math.round(timer.seconds / 60)) : undefined;
+    await onUpdate(step.id, { status: 'completed', notes, actualMinutes: measuredMinutes });
     onClose();
   };
+
+  const estimatedMinutes = step.estimatedMinutes ?? null;
+  const overEstimate = estimatedMinutes != null && timer.seconds / 60 > estimatedMinutes;
 
   return (
     <div className="fixed inset-0 z-50 bg-surface-950 flex flex-col">
@@ -67,7 +90,14 @@ export default function FocusMode({ task, step, onUpdate, onClose }) {
 
           {/* Timer */}
           <div className="text-center">
-            <div className="text-5xl font-mono font-bold text-white tabular-nums">{timer.display}</div>
+            <div className={`text-5xl font-mono font-bold tabular-nums ${overEstimate ? 'text-amber-400' : 'text-white'}`}>
+              {timer.display}
+            </div>
+            {estimatedMinutes != null && (
+              <p className={`text-xs mt-1 ${overEstimate ? 'text-amber-400/80' : 'text-white/30'}`}>
+                Estimated ~{estimatedMinutes} min{overEstimate ? ' — running over' : ''}
+              </p>
+            )}
             <button
               onClick={() => setRunning((r) => !r)}
               className="mt-3 text-xs text-white/40 hover:text-white border border-white/10 rounded-full px-4 py-1.5"
