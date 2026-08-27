@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatDistanceToNow, isPast } from 'date-fns';
 import { deleteTask } from '../api/index.js';
+import { useAuth } from '../context/AuthContext.jsx';
+import CalendarSyncToggle from './CalendarSyncToggle.jsx';
 
 const RISK_STYLES = {
   high: 'text-rose-400 bg-rose-500/10 border-rose-500/30',
@@ -20,25 +22,28 @@ const PRIORITY_STYLES = {
  * excludes subtasks/execution steps/resources/notes/schedules/dependencies —
  * that detail lives one click away in the Project Workspace.
  */
-export default function ProjectCard({ project, onDeleted }) {
+export default function ProjectCard({ project, onDeleted, onEnhance, enhancing }) {
+  const { profile } = useAuth();
   const risk = RISK_STYLES[project.riskLevel] || RISK_STYLES.low;
   const priorityColor = PRIORITY_STYLES[project.priority] || PRIORITY_STYLES.low;
   const deadline = project.deadline ? new Date(project.deadline) : null;
   const overdue = deadline && isPast(deadline) && project.status !== 'completed';
   const [deleting, setDeleting] = useState(false);
+  const isManualUnenhanced = project.manualMode && !project.hasSchedule;
 
+  // Archive = soft-delete. Confirmation text clarifies data is preserved.
   const handleDelete = async (e) => {
     e.preventDefault();
     e.stopPropagation();
     if (deleting) return;
-    if (!window.confirm(`Delete "${project.title}"? This can't be undone.`)) return;
+    if (!window.confirm(`Archive "${project.title}"? It will be removed from your dashboard but its history is preserved for AI learning.`)) return;
     setDeleting(true);
     try {
       await deleteTask(project.id);
       onDeleted?.(project.id);
     } catch (err) {
-      console.error('[ProjectCard] delete failed:', err);
-      alert(err.message || 'Failed to delete project');
+      console.error('[ProjectCard] archive failed:', err);
+      alert(err.message || 'Failed to archive project');
       setDeleting(false);
     }
   };
@@ -51,8 +56,16 @@ export default function ProjectCard({ project, onDeleted }) {
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="font-semibold text-white truncate group-hover:text-brand-400 transition-colors">
+          <h3 className="font-semibold text-white truncate group-hover:text-brand-400 transition-colors flex items-center gap-1.5">
             {project.title}
+            {isManualUnenhanced && (
+              <span
+                title="Created manually — no AI scheduling applied yet"
+                className="text-[10px] font-medium text-white/40 border border-white/10 rounded-full px-1.5 py-0.5 flex-shrink-0"
+              >
+                ✏️ manual
+              </span>
+            )}
           </h3>
           {project.currentMilestone && (
             <p className="text-xs text-white/40 mt-0.5 truncate">📍 {project.currentMilestone}</p>
@@ -66,8 +79,8 @@ export default function ProjectCard({ project, onDeleted }) {
             type="button"
             onClick={handleDelete}
             disabled={deleting}
-            title="Delete project"
-            aria-label="Delete project"
+            title="Archive project"
+            aria-label="Archive project"
             className="w-6 h-6 flex items-center justify-center rounded-md text-white/20 hover:text-rose-400 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
           >
             {deleting ? '…' : '🗑'}
@@ -122,11 +135,32 @@ export default function ProjectCard({ project, onDeleted }) {
         </div>
       )}
 
+      {/* Manual mode → AI upgrade path (suggestions.md #26) */}
+      {isManualUnenhanced && onEnhance && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onEnhance(project.id);
+          }}
+          disabled={enhancing}
+          className="text-xs font-medium text-brand-400 hover:text-brand-300 border border-brand-500/30 hover:border-brand-500/50 bg-brand-500/5 hover:bg-brand-500/10 rounded-lg px-3 py-1.5 transition-all disabled:opacity-50 disabled:cursor-wait"
+        >
+          {enhancing ? '✨ Enhancing…' : '✨ Let AI enhance this'}
+        </button>
+      )}
+
       {/* Footer */}
       <div className="flex items-center justify-between pt-1 border-t border-white/5 -mx-1 px-1 pt-3">
-        <span className="text-[11px] text-white/25">
-          Updated {project.lastUpdated ? formatDistanceToNow(new Date(project.lastUpdated), { addSuffix: true }) : '—'}
-        </span>
+        {/* Calendar sync toggle — stops click from navigating into the project */}
+        <div onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+          <CalendarSyncToggle
+            taskId={project.id}
+            initialEnabled={project.calendarSync !== false}
+            calendarConnected={!!profile?.calendarConnected}
+          />
+        </div>
         <span className="text-xs font-medium text-brand-400 group-hover:translate-x-0.5 transition-transform">
           Open Project →
         </span>

@@ -225,6 +225,13 @@ export async function orchestrateTask(processId, rawInput, userId, explicitDeadl
       // Preferences are always re-read, never resumed: a day/night change made
       // between the failed run and the retry should take effect immediately.
       context.preferences = preferences;
+      // Per-task calendar sync flag (default true). Stored in metadata so the
+      // calendar guard at step 12 and the PATCH /calendar-sync endpoint both
+      // read from the same place.
+      if (opts.calendarSync === false) {
+        context.metadata = context.metadata ?? {};
+        context.metadata.calendarSync = false;
+      }
 
       // ── 2·3·4. Memory · Benchmark · Knowledge, concurrently ───────────────
       // All three depend only on context.intent (or on nothing but userId), and
@@ -312,16 +319,24 @@ export async function orchestrateTask(processId, rawInput, userId, explicitDeadl
       }
       await checkpoint(taskId, context, 'schedule');
 
-      // ── 12. Google Calendar Agent — sync (if connected) ──────────────────
+      // ── 12. Google Calendar Agent — sync (if connected + enabled for task) ─
+      // `calendarSync` defaults to true for all tasks. Users can set it to
+      // false per-task via PATCH /api/tasks/:taskId/calendar-sync before or
+      // after submission. The flag is stored in context.metadata.calendarSync.
+      const calendarSyncEnabled = context.metadata?.calendarSync !== false;
       try {
-        const syncResult = await syncScheduleToCalendar(context, userId);
-        context.schedule.scheduledTasks = syncResult.scheduledTasks;
-        context.metadata.calendarConnected = syncResult.calendarConnected;
-        sseEmit(
-          'calendar', 'done',
-          syncResult.calendarConnected ? '📅 Synced to Google Calendar' : 'Calendar not connected — skipped sync',
-          null
-        );
+        if (calendarSyncEnabled) {
+          const syncResult = await syncScheduleToCalendar(context, userId);
+          context.schedule.scheduledTasks = syncResult.scheduledTasks;
+          context.metadata.calendarConnected = syncResult.calendarConnected;
+          sseEmit(
+            'calendar', 'done',
+            syncResult.calendarConnected ? '📅 Synced to Google Calendar' : 'Calendar not connected — skipped sync',
+            null
+          );
+        } else {
+          sseEmit('calendar', 'done', '📅 Calendar sync disabled for this project — skipped', null);
+        }
       } catch (err) {
         console.warn('[Orchestrator] Calendar sync skipped:', err.message);
         sseEmit('calendar', 'warning', 'Calendar sync skipped', null);

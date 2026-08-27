@@ -321,6 +321,10 @@ export function toClientTask(context) {
                 isReview: task.isReview ?? false,
                 milestoneId: task.milestoneId,
                 moduleId: task.moduleId,
+                // User-entered deadline on a manually-created subtask (Manual
+                // Project Builder). AI-planned tasks never set this — only the
+                // overall project deadline (`intent.deadline`) applies to them.
+                deadline: task.deadline ?? null,
 
                 // Progress (mutable by progress_tracking_agent)
                 completed: task.progress?.status === 'completed',
@@ -383,6 +387,14 @@ export function toClientTask(context) {
         createdAt: context.metadata.createdAt,
         updatedAt: context.metadata.updatedAt,
         pipelineVersion: context.metadata.pipelineVersion,
+        // Manual Todo Mode (AI-optional fallback — see suggestions.md #26):
+        // `manualMode` marks a project created via POST /api/tasks/manual
+        // (bypassed the 15-agent pipeline entirely). `hasSchedule` tells the
+        // client whether an AI schedule has since been generated — once the
+        // user runs "Let AI enhance" (which reuses the existing resume/
+        // checkpoint flow) this flips true and the manual badge/CTA retire.
+        manualMode: context.metadata?.manualMode ?? false,
+        hasSchedule: !!context.schedule,
     };
 }
 

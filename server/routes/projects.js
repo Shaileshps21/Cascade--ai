@@ -84,6 +84,9 @@ router.get('/', requireAuth, async (req, res) => {
                 nextRecommendedTask: project.nextBestAction?.taskTitle ?? null,
                 lastUpdated: project.updatedAt,
                 status: project.status,
+                manualMode: project.manualMode,
+                hasSchedule: project.hasSchedule,
+                calendarSync: context.metadata?.calendarSync !== false,
             };
         });
 

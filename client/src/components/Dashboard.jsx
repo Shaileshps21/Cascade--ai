@@ -7,8 +7,9 @@ import SchedulePreferences from './SchedulePreferences.jsx';
 import ResourceModeToggle from './ResourceModeToggle.jsx';
 import ApiKeySetup from './ApiKeySetup.jsx';
 import DailyBriefing from './dailyBriefing.jsx';
+import Onboarding from './Onboarding.jsx';
 import { useSSE } from '../hooks/useSSE.js';
-import { getProjects, getApiKeyStatus, getFailedTasks, resumeTask, deleteTask } from '../api/index.js';
+import { getProjects, getApiKeyStatus, getFailedTasks, resumeTask, deleteTask, getOnboardingStatus } from '../api/index.js';
 
 const FILTERS = ['all', 'active', 'at_risk', 'completed', 'overdue'];
 
@@ -210,6 +211,11 @@ export default function Dashboard() {
   const [savedModel, setSavedModel] = useState(null);
   const [quotaExceeded, setQuotaExceeded] = useState(false);
 
+  // ── Onboarding flow ───────────────────────────────────────────────────────
+  // Shown once to new users with zero projects. After dismissal (skip or
+  // "Get Started") the state is persisted in Firestore so it never reappears.
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
   // ── Quota resume state ────────────────────────────────────────────────────
   // `quotaEvent` carries { taskId, rawGoal, pipelineStage, isPersonal } from
   // the most-recent quota_exceeded SSE event. `failedTasks` is the list fetched
@@ -269,6 +275,17 @@ export default function Dashboard() {
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
   useEffect(() => { fetchFailedTasks(); }, [fetchFailedTasks]);
+
+  // Show onboarding to brand-new users who have no projects yet and haven't
+  // completed the tour. Only runs once after the initial projects fetch settles.
+  useEffect(() => {
+    if (loading) return; // wait until the first fetch is done
+    if (projects.length > 0) return; // existing users never see this
+    getOnboardingStatus()
+      .then(({ completed }) => { if (!completed) setShowOnboarding(true); })
+      .catch(() => {}); // non-fatal — silently skip if endpoint unavailable
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]); // intentionally only runs once when loading flips to false
 
   const fetchApiKeyStatus = useCallback(() => {
     return getApiKeyStatus()
@@ -381,6 +398,9 @@ export default function Dashboard() {
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-5">
 
+      {/* First-run onboarding overlay — shown only to new users with zero projects */}
+      {showOnboarding && <Onboarding onDone={() => setShowOnboarding(false)} />}
+
       {/* Stats bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Active" value={stats.active} total={total} color="text-brand-400" bgColor="bg-brand-500/5" borderColor="border-brand-500/30" icon="⚡" urgent={false} onClick={() => setFilter(filter === 'active' ? 'all' : 'active')} active={filter === 'active'} />
@@ -474,7 +494,13 @@ export default function Dashboard() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {filteredProjects.map((project) => (
-            <ProjectCard key={project.id} project={project} onDeleted={handleProjectDeleted} />
+            <ProjectCard
+              key={project.id}
+              project={project}
+              onDeleted={handleProjectDeleted}
+              onEnhance={handleResume}
+              enhancing={resumingId === project.id}
+            />
           ))}
         </div>
       )}

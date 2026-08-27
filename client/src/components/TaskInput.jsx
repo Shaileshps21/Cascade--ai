@@ -602,7 +602,9 @@
 
 // ------------------------------new file-------------------------------------------------------------
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { initiateTask } from '../api/index.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 const PLACEHOLDERS = [
   "Submit ML assignment — it's complex and I haven't started...",
@@ -677,11 +679,13 @@ const PRESETS = [
 ];
 
 export default function TaskInput({ onProcessStart }) {
+  const { profile } = useAuth();
   const [input, setInput] = useState('');
   const [deadline, setDeadline] = useState(''); // datetime-local string in LOCAL time
   const [showPicker, setShowPicker] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [calendarSync, setCalendarSync] = useState(true); // default: sync if calendar is connected
   const [placeholder] = useState(
     () => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]
   );
@@ -709,7 +713,7 @@ export default function TaskInput({ onProcessStart }) {
         });
       }
 
-      const { processId } = await initiateTask(trimmed, isoDeadline);
+      const { processId } = await initiateTask(trimmed, isoDeadline, calendarSync);
       onProcessStart?.(processId);
       setInput('');
       setDeadline('');
@@ -841,28 +845,54 @@ export default function TaskInput({ onProcessStart }) {
 
       {error && <p className="text-xs text-rose-400">{error}</p>}
 
+      {/* Calendar sync option — shown only if calendar is connected */}
+      {profile?.calendarConnected && (
+        <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
+          <input
+            type="checkbox"
+            checked={calendarSync}
+            onChange={(e) => setCalendarSync(e.target.checked)}
+            className="w-3.5 h-3.5 rounded accent-brand-500 cursor-pointer"
+          />
+          <span className="text-xs text-white/40 hover:text-white/60 transition-colors">
+            📅 Sync to Google Calendar
+          </span>
+        </label>
+      )}
+
       {/* Footer */}
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-white/20">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-white/20 hidden sm:block">
           AI agents parse → prioritize → plan → schedule automatically.
         </p>
-        <button
-          onClick={handleSubmit}
-          disabled={loading || !input.trim() || deadlinePassed}
-          className="btn-primary flex items-center gap-2 text-sm"
-        >
-          {loading ? (
-            <>
-              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Launching agents...
-            </>
-          ) : (
-            <><span>Activate</span><span>→</span></>
-          )}
-        </button>
+        <div className="flex items-center gap-3 ml-auto">
+          {/* Manual Todo Mode — bypass the AI pipeline entirely. Useful when
+              the API quota is exhausted, offline, or the user already has a
+              plan and just wants tracking + scheduling. */}
+          <Link
+            to="/projects/new/manual"
+            className="text-xs text-white/40 hover:text-white/70 transition-colors whitespace-nowrap"
+          >
+            Add manually →
+          </Link>
+          <button
+            onClick={handleSubmit}
+            disabled={loading || !input.trim() || deadlinePassed}
+            className="btn-primary flex items-center gap-2 text-sm"
+          >
+            {loading ? (
+              <>
+                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Launching agents...
+              </>
+            ) : (
+              <><span>Activate</span><span>→</span></>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

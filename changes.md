@@ -13,6 +13,171 @@ rather than left implied.
 
 ---
 
+## 2026-08-27 — Manual Todo Mode (AI-Optional Fallback) ✅
+
+**What.** Users can now bypass the 15-agent pipeline entirely and build a project by hand — title, modules, subtasks (with optional estimate/priority/deadline per subtask) — via a new **"Add manually →"** link next to the "Activate" button on the Dashboard. This keeps the app usable when the API quota is exhausted, the user is offline, or they already have a plan and just want tracking + scheduling. Implements suggestions.md #26.
+
+**How it works.** `POST /api/tasks/manual` builds a `PlanningContext` directly — no LLM calls anywhere in the handler — using the exact same `planning.milestones`/`planning.tasks` shape `planning_agent` produces (one synthetic milestone wraps the user's modules; each subtask becomes a task with exactly one execution step, so the existing step-driven Task Workspace can mark it complete like any AI-planned task). `metadata.manualMode = true` and `metadata.pipelineStage = 'planning'` (deliberately not `'complete'`) so the project renders in every existing view immediately, and:
+
+**Graceful AI upgrade path — "Let AI enhance this".** Because the manual context is checkpointed at the same `'planning'` stage the real orchestrator uses, the *existing* `POST /:taskId/resume` endpoint (built for quota-interrupted pipelines) already knows how to pick it up: it skips intent/planning (already set by the user) and runs dependency analysis, time estimation, feasibility, and the scheduler against the user's own tasks — turning a manual project into a fully AI-scheduled one with no new orchestrator code. A **"✨ Let AI enhance this"** button appears on manual project cards (reusing the Dashboard's existing resume/SSE plumbing) until a schedule exists, alongside a small **"✏️ manual"** badge; both retire automatically once enhancement completes.
+
+**Bug fixed along the way.** `PATCH /api/tasks/:taskId/calendar-sync`'s enable path unconditionally did `context.schedule.scheduledTasks = ...`, which would throw for any project with `schedule: null` (every manual project before enhancement) — swallowed by the route's catch into a misleading 502. Now guarded: syncing is skipped (flag still persisted) when there's no schedule yet. Also added the missing `calendarSync` field to `GET /api/projects`'s per-project mapping — `CalendarSyncToggle` was reading `project.calendarSync` but the route never sent it.
+
+**Files changed:**
+- `server/routes/tasks.js` — new `POST /manual` endpoint; calendar-sync enable-path null guard.
+- `server/routes/projects.js` — `GET /` mapping now includes `manualMode`, `hasSchedule`, `calendarSync`.
+- `server/agents/contextManager.js` — `toClientTask()` now surfaces `manualMode`, `hasSchedule`, and a per-subtask `deadline`.
+- `client/src/pages/ManualProjectBuilder.jsx` — **NEW**. The builder page: title, deadline, calendar-sync checkbox, modules with inline "+Add subtask", running total-hours footer.
+- `client/src/App.jsx` — new route `/projects/new/manual`.
+- `client/src/components/TaskInput.jsx` — "Add manually →" link next to the Activate button.
+- `client/src/components/ProjectCard.jsx` — "✏️ manual" badge + "✨ Let AI enhance this" button (shown while `manualMode && !hasSchedule`).
+- `client/src/components/Dashboard.jsx` — wires `ProjectCard`'s enhance button to the existing `handleResume`/`resumingId` (same mechanism as the interrupted-pipeline resume banner — no new SSE plumbing).
+- `client/src/api/index.js` — new `createManualProject()` export.
+- `client/src/pages/TaskWorkspace.jsx` — shows "Due <date>" next to priority when a subtask has its own deadline (previously collected by the builder but never rendered anywhere).
+
+**Verified:** `npm run build` passes (374 modules, 0 errors, twice). `npm test` (server) passes — 363/363, 52 suites, no regressions. Traced every render path a manual project (`schedule: null`, possibly `intent.deadline: null`) actually hits: `ProjectWorkspace.jsx`'s Overview/Schedule/Resources/Analytics/Notes/Settings tabs, `RoadmapTree`/`NextBestAction`/`RiskMeter` — all null-guard the AI-only fields (`scheduledStart`, `schedulingScore`, `feasibilitySuggestions`, etc.) already. Also confirmed `deadline_feasibility_agent` and `scheduler_agent` both short-circuit cleanly (`isFeasible: true`, no LLM call) when `intent.deadline` is null, so "Let AI enhance" on a deadline-less manual project degrades gracefully rather than crashing or misdating. Not yet manually clicked through in an actual browser (no dev server / Firestore credentials in this session) — recommend a smoke test of: create manual project → mark its one execution step complete on Task Workspace → click "Let AI enhance this" → confirm the manual badge disappears once scheduling finishes.
+
+---
+
+## 2026-08-24 — Weekend-Heavy Scheduling Mode + Login Account Switcher ✅
+
+### Feature 1: Weekend-Heavy Scheduling Mode
+
+**What.** A fourth weekend mode option — **🏋️ Weekend heavy** — is now available in Settings → Scheduling Preferences. When selected, the scheduler places **150% of the weekday daily budget** on Saturdays and Sundays. This is designed for users whose primary available work time is the weekend (e.g. students, full-time workers), so the plan front-loads progress on weekend days and keeps weekday sessions lighter.
+
+**How it works in the scheduler:**
+The `effectiveBudget` logic in `buildScheduleSkeleton` now uses a full 4-way branch:
+
+| Mode | Weekend budget |
+|---|---|
+| `skip` | Weekends never receive tasks (cursor jumps to Monday) |
+| `light` | 50% of weekday budget |
+| `normal` | 100% (same as weekday) |
+| **`heavy`** | **150% of weekday budget** |
+
+The LLM is also told explicitly: *"Treat weekends as the primary working days... weekdays can be lighter as a result."*
+
+**Files changed:**
+- `server/agents/scheduler_agent/agent.js` — added `WEEKEND_HEAVY_BUDGET_FRACTION = 1.5` constant; `WEEKEND_MODES` array updated to include `'heavy'`; `effectiveBudget` ternary chain extended to cover all 4 modes.
+- `server/agents/scheduler_agent/prompt_v1.js` — `weekendLabel` ternary updated with a heavy-mode description for the LLM; JSDoc updated.
+- `server/routes/settings.js` — `WEEKEND_MODES` validation array updated to include `'heavy'`.
+- `client/src/components/SchedulePreferences.jsx` — new `{ id: 'heavy', label: '🏋️ Weekend heavy', ... }` entry in `WEEKEND_OPTIONS` array; renders as a 4th button in the segmented control.
+
+**Verified:** Build passes (373 modules, 0 errors). Weekend-heavy mode button appears in Settings; selecting it saves `weekendMode: 'heavy'` to Firestore.
+
+---
+
+### Feature 2: Login Page — Switch Google Account
+
+**What.** A secondary button **"Use a different Google account"** is now shown below the main "Continue with Google" button on the login page. Clicking it:
+1. Signs out of the current Firebase session (clears any cached credential).
+2. Opens the Google account-picker popup with `prompt: 'select_account'` — this forces Google to always show the account chooser instead of silently re-using the currently signed-in account.
+3. Signs in with the chosen account and navigates to the dashboard.
+
+Cancelling the popup (× or clicking outside) is handled gracefully — no error is shown to the user.
+
+**Why.** Previously, if a user was signed into the wrong Google account, the only way to switch was to sign out from Settings, then come back to the login page and sign in again. The new button makes this a one-step flow from the login screen.
+
+**Files changed:**
+- `client/src/context/AuthContext.jsx` — new `signInWithDifferentAccount()` method: calls `signOut(auth)` first, then opens `signInWithPopup` with a cloned provider with `{ prompt: 'select_account' }`. Exported via the context value.
+- `client/src/pages/Login.jsx` — destructures `signInWithDifferentAccount` from `useAuth`; adds `switchLoading` state; `handleSwitchAccount` async handler with graceful popup-cancel handling (`auth/popup-closed-by-user`, `auth/cancelled-popup-request` are silently ignored); renders the secondary button below the main sign-in button with a swap-arrows icon; both buttons disable together via `anyLoading` guard.
+
+**Verified:** Build passes. "Use a different Google account" button appears; clicking it signs out and opens the Google account picker.
+
+---
+
+## 2026-08-23 — Weekend Scheduling Preference + User-Defined Daily Capacity ✅
+
+Two new scheduling preferences — both exposed in Settings → `SchedulePreferences` and propagated through the entire scheduler pipeline.
+
+### Feature 1: Weekend Scheduling Mode (3-way toggle)
+
+**What.** Users can now choose how much work the scheduler places on Saturdays and Sundays:
+
+| Mode | Behaviour |
+|---|---|
+| **⛔ Skip weekends** (default) | Cursor skips Sat/Sun entirely — no tasks land on weekends |
+| **🌅 Light weekends** | Weekend tasks allowed, but capped at 50% of the weekday daily budget |
+| **📅 Full weekends** | Weekends treated identically to weekdays |
+
+**Files changed:**
+- `server/agents/scheduler_agent/agent.js` — new exported constants `WEEKEND_MODES`, `DEFAULT_WEEKEND_MODE = 'skip'`, `WEEKEND_LIGHT_BUDGET_FRACTION = 0.5`; new exported `isWeekend(date)` helper; `clampToWorkingHours` now accepts and applies `weekendMode` (skips Sat/Sun via while-loop when `skip`, recurses after roll-forward so skip applies transitively); `findNextFreeSlot` passes `weekendMode` to every `clampToWorkingHours` call including the "try next day" roll-forward; `buildScheduleSkeleton` accepts `weekendMode` and computes `effectiveBudget` (50% on weekend days in `light` mode, full otherwise); `runSchedulerAgent` destructures `weekendMode` from `resolveWorkingHours` and passes it through to both skeleton calls.
+- `server/agents/scheduler_agent/prompt_v1.js` — `buildSchedulerPrompt` now accepts `weekendMode`; the context block sent to the LLM includes a human-readable "Weekend preference: ..." line so the LLM's refinement pass doesn't undo the skeleton's weekend logic.
+- `server/routes/settings.js` — `GET /preferences` returns `weekendMode` (default `'skip'`); `PUT /preferences` validates and saves `weekendMode`.
+- `client/src/api/index.js` — new `saveWeekendMode(weekendMode)` export.
+- `client/src/components/SchedulePreferences.jsx` — new 3-button segmented control row for weekend mode; "Recommended" green dot on the `skip` option.
+
+**Verified:** Build passes. Skip mode: no task lands on Saturday or Sunday. Light mode: Saturday tasks exist but in shorter sessions. Normal mode: full parity with weekdays.
+
+---
+
+### Feature 2: User-Defined Daily Capacity (Hours/Day Stepper)
+
+**What.** The scheduler's daily budget (previously hard-coded to 2 h/day for every user) is now set by the user via a stepper control (0.5–12 h, step 0.5 h, debounced 600 ms save). The value is stored in `preferences.availableHoursPerDay` and replaces the `DEFAULT_DAILY_AVAILABLE_MINUTES` constant at every call site that used it.
+
+**Why.** A freelancer with 6 h/day and a student with 45 min/day were both getting a "2h/day" plan. The hook was already stubbed in the code comments (`// a future context.preferences.availableHoursPerDay could override this`) — this change finally wires it up end-to-end.
+
+**Files changed:**
+- `server/agents/scheduler_agent/agent.js` — `resolveWorkingHours` now also computes and returns `dailyAvailableMinutes` (from `prefs.availableHoursPerDay`, clamped to `[0.5, 12]`, falling back to `DEFAULT_DAILY_AVAILABLE_MINUTES`); `checkDeadlineFeasibility` now accepts `dailyAvailableMinutes` parameter so feasibility warnings reflect the user's actual capacity; both `buildScheduleSkeleton` calls in `runSchedulerAgent` (normal + infeasible path) now use the resolved `dailyAvailableMinutes` instead of the hard-coded constant; the "assumptions" string in the infeasibility response now logs the actual hours/day.
+- `server/agents/scheduler_agent/prompt_v1.js` — `dailyAvailableMinutes` label updated to include the 70% cap explicitly (`~${Math.round(m * 0.7)} min`).
+- `server/routes/settings.js` — `GET /preferences` returns `availableHoursPerDay` (default `2`); `PUT /preferences` validates range `[0.5, 12]` and saves it.
+- `client/src/api/index.js` — new `saveDailyCapacity(availableHoursPerDay)` export.
+- `client/src/components/SchedulePreferences.jsx` — new stepper row (− / value / +); live hint text that changes based on the selected value (e.g. "Full-time — only if this is your main commitment" at 8+h); spinner while saving.
+
+**Verified:** Build passes. Set to 4h → 10h project spans ~4 days instead of ~7. Feasibility warning message now says the user's actual hours/day instead of always "2h/day".
+
+---
+
+## 2026-08-20 — Per-Task Calendar Sync Toggle, Project Soft-Delete, First-Run Onboarding ✅
+
+### Feature 1: Per-Task Google Calendar Sync Toggle
+
+**What.** Users can now independently enable or disable Google Calendar syncing for each project. The toggle appears as a pill button (📅 "Calendar synced" / 🚫 "Sync off") in the footer of each project card. A checkbox also appears in TaskInput before task submission if the calendar is connected — so the user can opt out before the pipeline even runs.
+
+**Files changed:**
+- `server/agents/orchestrator.js` — step 12 (calendar sync) is now guarded by `context.metadata?.calendarSync !== false`. If false, SSE emits a "Calendar sync disabled" event instead of calling Google Calendar. `opts.calendarSync` is also wired into `context.metadata.calendarSync` right after context creation.
+- `server/routes/tasks.js` — `POST /api/tasks/initiate` accepts `calendarSync` (boolean, default `true`) and passes it to orchestrator.
+- `server/routes/tasks.js` — new `PATCH /:taskId/calendar-sync` endpoint: `enabled=false` deletes Google Calendar events and clears `calendarEventId` fields; `enabled=true` re-syncs. Both paths persist `metadata.calendarSync` in Firestore.
+- `client/src/api/index.js` — `initiateTask` now accepts `calendarSync` param; new `setTaskCalendarSync(taskId, enabled)` export added.
+- `client/src/components/CalendarSyncToggle.jsx` — **NEW**. Pill toggle component with optimistic update + rollback on error. Greyed-out hint shown when calendar is not connected.
+- `client/src/components/ProjectCard.jsx` — imports `CalendarSyncToggle` and `useAuth`; renders toggle in card footer with click propagation stopped.
+- `client/src/components/TaskInput.jsx` — imports `useAuth`; adds `calendarSync` state; renders checkbox before submit button when `profile.calendarConnected` is true.
+
+**Verified:** `npm run build` passes (373 modules, 0 errors).
+
+---
+
+### Feature 2: Project Soft-Delete (Archive)
+
+**What.** The trash-can button on each project card now performs a *soft-delete* (archive) rather than permanently deleting the Firestore document. The document is marked `metadata.archived = true`. The project disappears from the dashboard immediately. Google Calendar events are still deleted on archive. Data is retained for potential memory-agent use.
+
+**Why.** Permanent deletion wiped historical project data that the memory agent uses to calibrate estimates. Soft-delete preserves it invisibly.
+
+**Files changed:**
+- `server/routes/tasks.js` — `DELETE /:taskId` now merges `{ metadata.archived: true, metadata.archivedAt, metadata.pipelineFailed: false }` instead of calling `doc.ref.delete()`.
+- `server/routes/tasks.js` — `GET /` filter updated to exclude `metadata.archived === true` in addition to `pipelineFailed === true`.
+- `server/routes/tasks.js` — `GET /failed` now filters out archived documents so they don't reappear in the resume banner.
+- `client/src/components/ProjectCard.jsx` — confirm dialog and button labels updated to say "Archive" (with a message that history is preserved).
+- `firestore.indexes.json` — two new composite indexes: `(userId, metadata.archived, createdAt)` and `(userId, metadata.pipelineFailed, metadata.archived)`.
+
+**Verified:** Build passes. Archived projects disappear from the grid; Firestore document retained with `archived: true`.
+
+---
+
+### Feature 3: First-Run Onboarding Flow (4 Slides)
+
+**What.** A 4-slide skippable overlay is shown once to new users who have zero projects. Slides cover: (1) what LifeSaver does, (2) the 15-agent pipeline, (3) Google Calendar sync, (4) three quick-start tips. After any dismissal path (skip, ×, or "Get Started"), `users/{uid}/settings/onboarding → { completed: true }` is written to Firestore so it never shows again.
+
+**Files changed:**
+- `server/routes/settings.js` — `GET /api/settings/onboarding` returns `{ completed: boolean }`; `POST /api/settings/onboarding/complete` persists the flag.
+- `client/src/api/index.js` — new `getOnboardingStatus()` and `completeOnboarding()` exports.
+- `client/src/components/Onboarding.jsx` — **NEW**. Full-screen backdrop overlay; slide indicator dots; Previous / Next / Skip / Get Started navigation. Pure Tailwind — no extra animation library.
+- `client/src/components/Dashboard.jsx` — imports `Onboarding` and `getOnboardingStatus`; adds `showOnboarding` state and a `useEffect` that triggers once when `loading` flips false (checks `projects.length === 0 && !completed`); renders `<Onboarding>` at the top of the JSX return.
+
+**Verified:** Build passes. Trigger logic fires only when `projects.length === 0 && completed === false`. Dismiss persists to Firestore; page refresh never re-triggers.
+
+---
+
 ## 2026-08-02 — AgentTrace inner-scroll fix (page no longer drifts while agents run) ✅
 
 **The problem.** While the pipeline was streaming, the dashboard page was

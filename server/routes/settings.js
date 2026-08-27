@@ -62,6 +62,37 @@
 //     }
 // });
 
+// // ── Onboarding state ─────────────────────────────────────────────────────────
+// Tracks whether the user has seen and dismissed the first-run onboarding flow.
+// Stored at users/{uid}/settings/onboarding → { completed: boolean, completedAt? }
+
+// GET /api/settings/onboarding
+// router.get('/onboarding', requireAuth, async (req, res) => {
+//     try {
+//         const doc = await db
+//             .collection('users').doc(req.user.uid)
+//             .collection('settings').doc('onboarding')
+//             .get();
+//         res.json({ completed: doc.exists ? (doc.data()?.completed === true) : false });
+//     } catch {
+//         res.json({ completed: false });
+//     }
+// });
+
+// // POST /api/settings/onboarding/complete
+// // Called when the user finishes or skips the onboarding flow.
+// router.post('/onboarding/complete', requireAuth, async (req, res) => {
+//     try {
+//         await db
+//             .collection('users').doc(req.user.uid)
+//             .collection('settings').doc('onboarding')
+//             .set({ completed: true, completedAt: new Date().toISOString() }, { merge: true });
+//         res.json({ success: true });
+//     } catch {
+//         res.status(500).json({ error: 'Failed to save onboarding state.' });
+//     }
+// });
+
 // export default router;
 
 //-------------------------------------------------------- new file----------------------
@@ -183,9 +214,10 @@ router.delete('/apikey', requireAuth, async (req, res) => {
 // ── Scheduling preferences — day person / night person / flexible ──────────
 // Read by scheduler_agent (see resolveWorkingHours in
 // agents/scheduler_agent/agent.js) to pick the working-hours window tasks
-// get scheduled into.
+// get scheduled into, the weekend mode, and the daily capacity.
 const WORK_STYLES = ['day', 'night', 'flexible'];
 const RESOURCE_MODES = ['urls', 'info_only'];
+const WEEKEND_MODES = ['skip', 'light', 'normal', 'heavy'];
 
 // ── GET /api/settings/preferences ───────────────────────────────────────────
 router.get('/preferences', requireAuth, async (req, res) => {
@@ -198,15 +230,17 @@ router.get('/preferences', requireAuth, async (req, res) => {
         res.json({
             workStyle: data.workStyle || 'flexible',
             resourceMode: data.resourceMode || 'urls',
+            weekendMode: data.weekendMode || 'skip',
+            availableHoursPerDay: typeof data.availableHoursPerDay === 'number' ? data.availableHoursPerDay : 2,
         });
     } catch {
-        res.json({ workStyle: 'flexible', resourceMode: 'urls' });
+        res.json({ workStyle: 'flexible', resourceMode: 'urls', weekendMode: 'skip', availableHoursPerDay: 2 });
     }
 });
 
 // ── PUT /api/settings/preferences ───────────────────────────────────────────
 router.put('/preferences', requireAuth, async (req, res) => {
-    const { workStyle, resourceMode } = req.body ?? {};
+    const { workStyle, resourceMode, weekendMode, availableHoursPerDay } = req.body ?? {};
 
     if (workStyle !== undefined && !WORK_STYLES.includes(workStyle)) {
         return res.status(400).json({ error: `workStyle must be one of: ${WORK_STYLES.join(', ')}.` });
@@ -214,13 +248,23 @@ router.put('/preferences', requireAuth, async (req, res) => {
     if (resourceMode !== undefined && !RESOURCE_MODES.includes(resourceMode)) {
         return res.status(400).json({ error: `resourceMode must be one of: ${RESOURCE_MODES.join(', ')}.` });
     }
-    if (workStyle === undefined && resourceMode === undefined) {
-        return res.status(400).json({ error: 'At least one of workStyle or resourceMode is required.' });
+    if (weekendMode !== undefined && !WEEKEND_MODES.includes(weekendMode)) {
+        return res.status(400).json({ error: `weekendMode must be one of: ${WEEKEND_MODES.join(', ')}.` });
+    }
+    if (availableHoursPerDay !== undefined) {
+        if (typeof availableHoursPerDay !== 'number' || availableHoursPerDay < 0.5 || availableHoursPerDay > 12) {
+            return res.status(400).json({ error: 'availableHoursPerDay must be a number between 0.5 and 12.' });
+        }
+    }
+    if (workStyle === undefined && resourceMode === undefined && weekendMode === undefined && availableHoursPerDay === undefined) {
+        return res.status(400).json({ error: 'At least one preference field is required.' });
     }
 
     const patch = {};
     if (workStyle !== undefined) patch.workStyle = workStyle;
     if (resourceMode !== undefined) patch.resourceMode = resourceMode;
+    if (weekendMode !== undefined) patch.weekendMode = weekendMode;
+    if (availableHoursPerDay !== undefined) patch.availableHoursPerDay = availableHoursPerDay;
     patch.updatedAt = new Date();
 
     try {
@@ -231,6 +275,37 @@ router.put('/preferences', requireAuth, async (req, res) => {
         res.json({ success: true, ...patch });
     } catch {
         res.status(500).json({ error: 'Failed to save preferences.' });
+    }
+});
+
+// ── Onboarding state ─────────────────────────────────────────────────────────
+// Tracks whether the user has seen and dismissed the first-run onboarding flow.
+// Stored at users/{uid}/settings/onboarding → { completed: boolean, completedAt? }
+
+// GET /api/settings/onboarding
+router.get('/onboarding', requireAuth, async (req, res) => {
+    try {
+        const doc = await db
+            .collection('users').doc(req.user.uid)
+            .collection('settings').doc('onboarding')
+            .get();
+        res.json({ completed: doc.exists ? (doc.data()?.completed === true) : false });
+    } catch {
+        res.json({ completed: false });
+    }
+});
+
+// POST /api/settings/onboarding/complete
+// Called when the user finishes or skips the onboarding flow.
+router.post('/onboarding/complete', requireAuth, async (req, res) => {
+    try {
+        await db
+            .collection('users').doc(req.user.uid)
+            .collection('settings').doc('onboarding')
+            .set({ completed: true, completedAt: new Date().toISOString() }, { merge: true });
+        res.json({ success: true });
+    } catch {
+        res.status(500).json({ error: 'Failed to save onboarding state.' });
     }
 });
 

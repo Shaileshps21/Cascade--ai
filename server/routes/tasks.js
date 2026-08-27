@@ -6,13 +6,13 @@ import { registerClient } from '../rag/sseManager.js';
 import { orchestrateTask, replanTask, resumeTask } from '../agents/orchestrator.js';
 import { checkSingleTask } from '../agents/progress_tracking_agent/agent.js';
 import { deleteCalendarEvents } from '../agents/google_calendar_agent/agent.js';
-import { fromFirestoreDocument, toFirestoreDocument, toClientTask, toTaskHistoryEntry } from '../agents/contextManager.js';
+import { createContext, fromFirestoreDocument, toFirestoreDocument, toClientTask, toTaskHistoryEntry } from '../agents/contextManager.js';
 
 const router = express.Router();
 
 // ── POST /api/tasks/initiate ────────────────────────────────────────────────
 router.post('/initiate', requireAuth, async (req, res) => {
-  const { rawInput, deadline } = req.body;
+  const { rawInput, deadline, calendarSync = true } = req.body;
 
   if (!rawInput?.trim()) {
     return res.status(400).json({ error: 'rawInput is required' });
@@ -37,11 +37,202 @@ router.post('/initiate', requireAuth, async (req, res) => {
 
   const processId = uuidv4();
 
+  // Pass calendarSync as an option to the orchestrator. The orchestrator
+  // stores it in context.metadata.calendarSync so step 12 (Google Calendar
+  // agent) can read it without any additional DB round-trip.
   setImmediate(() =>
-    orchestrateTask(processId, rawInput.trim(), req.user.uid, resolvedDeadline)
+    orchestrateTask(processId, rawInput.trim(), req.user.uid, resolvedDeadline, { calendarSync: calendarSync !== false })
   );
 
   res.json({ processId });
+});
+
+// ── POST /api/tasks/manual ──────────────────────────────────────────────────
+// Manual Project Builder (Manual Todo Mode — suggestions.md #26): bypasses
+// the 15-agent pipeline entirely so the app stays usable when the API quota
+// is exhausted, the user is offline, or already has a plan in mind. Writes
+// directly into the same PlanningContext schema every other view reads, so
+// Project Workspace / Task Workspace / Progress Tracker / archive all work
+// with zero extra code. No LLM calls are made anywhere in this handler.
+//
+// Body: { title, deadline?, calendarSync?, modules: [{ title, subtasks: [
+//   { title, estimatedMinutes?, priority?, deadline? }
+// ] }] }
+const MANUAL_PRIORITIES = ['low', 'medium', 'high', 'critical'];
+
+router.post('/manual', requireAuth, async (req, res) => {
+  const { title, deadline, calendarSync = true, modules } = req.body ?? {};
+
+  if (!title?.trim()) {
+    return res.status(400).json({ error: 'Project title is required.' });
+  }
+  if (!Array.isArray(modules)) {
+    return res.status(400).json({ error: 'At least one module with a subtask is required.' });
+  }
+
+  // Drop modules/subtasks with no title — the builder UI shouldn't submit
+  // any, but never trust the client alone for a write endpoint.
+  const cleanModules = modules
+    .map((m) => ({
+      title: (m?.title ?? '').trim(),
+      subtasks: Array.isArray(m?.subtasks)
+        ? m.subtasks.filter((s) => s?.title?.trim())
+        : [],
+    }))
+    .filter((m) => m.title && m.subtasks.length > 0);
+
+  if (cleanModules.length === 0) {
+    return res.status(400).json({ error: 'Add at least one module with at least one subtask.' });
+  }
+
+  let resolvedDeadline = null;
+  if (deadline) {
+    const d = new Date(deadline);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid deadline format.' });
+    if (d <= new Date()) return res.status(400).json({ error: 'Deadline must be in the future.' });
+    resolvedDeadline = d.toISOString();
+  }
+
+  const taskId = uuidv4();
+  const context = createContext(taskId, req.user.uid, title.trim(), 'manual', resolvedDeadline);
+
+  // No AI ran, so this is exactly what the user told us — no inferred
+  // category/complexity/confidence to fabricate.
+  context.intent = {
+    title: title.trim(),
+    deadline: resolvedDeadline,
+    category: 'other',
+    complexity: 'medium',
+    urgency: 'Medium',
+  };
+
+  const milestoneId = 'M1';
+  const planningModules = [];
+  const planningTasks = [];
+  let taskCounter = 0;
+
+  for (let mi = 0; mi < cleanModules.length; mi++) {
+    const mod = cleanModules[mi];
+    const moduleId = `MOD${mi + 1}`;
+    const taskIds = [];
+
+    for (const st of mod.subtasks) {
+      taskCounter++;
+      const tId = `T${taskCounter}`;
+      taskIds.push(tId);
+
+      const priority = MANUAL_PRIORITIES.includes(st.priority) ? st.priority : 'medium';
+      const parsedMinutes = Number(st.estimatedMinutes);
+      const estimatedMinutes = Number.isFinite(parsedMinutes) && parsedMinutes > 0
+        ? Math.max(5, Math.round(parsedMinutes))
+        : 30;
+
+      let subtaskDeadline = null;
+      if (st.deadline) {
+        const sd = new Date(st.deadline);
+        if (!isNaN(sd.getTime())) subtaskDeadline = sd.toISOString();
+      }
+
+      const stepId = 'S1';
+      const subtaskTitle = st.title.trim();
+      planningTasks.push({
+        taskId: tId,
+        milestoneId,
+        moduleId,
+        title: subtaskTitle,
+        difficulty: 'medium',
+        requiredSkills: [],
+        dependencies: [],
+        priority,
+        estimatedMinutes,
+        reviewRequired: false,
+        isBuffer: false,
+        isReview: false,
+        deadline: subtaskDeadline,
+        overview: '',
+        objectives: [],
+        // Exactly one execution step per manual subtask — mirrors
+        // planning_agent's normalizeExecutionStep() shape verbatim so the
+        // Task Workspace (which is entirely step-driven) can mark it
+        // complete like any AI-planned task.
+        executionSteps: [{
+          id: stepId,
+          stepId,
+          title: subtaskTitle,
+          description: '',
+          order: 1,
+          estimatedMinutes,
+          status: 'pending',
+          dependencies: [],
+          resources: [],
+          notes: '',
+          completionEvidence: '',
+          isOptional: false,
+          progress: 0,
+          startedAt: null,
+          completedAt: null,
+          blockedReason: null,
+          blockedSince: null,
+        }],
+        deliverables: [],
+        successCriteria: [],
+        commonMistakes: [],
+        aiGuidance: [],
+        reflectionQuestions: [],
+        resources: [],
+        notes: [],
+        progress: { status: 'not_started', completedAt: null, actualMinutes: null },
+      });
+    }
+
+    planningModules.push({
+      id: moduleId,
+      title: mod.title,
+      description: '',
+      acceptanceCriteria: [],
+      dependencies: [],
+      tasks: taskIds,
+    });
+  }
+
+  context.planning = {
+    schemaVersion: '1.0.0',
+    milestones: [{
+      id: milestoneId,
+      title: title.trim(),
+      description: '',
+      estimatedOutcome: '',
+      completionCriteria: [],
+      riskLevel: 'medium',
+      dependencies: [],
+      modules: planningModules,
+    }],
+    tasks: planningTasks,
+    dependencyGraph: {},
+    criticalPath: [],
+    riskSummary: [],
+    planningNotes: 'Created manually — no AI planning applied yet.',
+    realGoal: title.trim(),
+  };
+
+  context.metadata.manualMode = true;
+  // Deliberately NOT 'complete': leaving it at the same checkpoint stage the
+  // orchestrator itself uses after planning means POST /:taskId/resume (the
+  // existing checkpoint-resume machinery, unchanged) already knows how to
+  // "Let AI enhance" this later — it will run dependency/estimation/
+  // feasibility/scheduler (and re-attach memory/knowledge) against these
+  // exact tasks, skipping nothing the user already decided.
+  context.metadata.pipelineStage = 'planning';
+  context.metadata.pipelineFailed = false;
+  context.metadata.calendarSync = calendarSync !== false;
+
+  try {
+    await db.collection('tasks').doc(taskId).set(toFirestoreDocument(context));
+    res.json({ taskId });
+  } catch (err) {
+    console.error('[Tasks POST /manual]', err);
+    res.status(500).json({ error: 'Failed to save manual project.' });
+  }
 });
 
 // ── GET /api/tasks/stream/:processId ───────────────────────────────────────
@@ -109,16 +300,18 @@ router.get('/failed', requireAuth, async (req, res) => {
       .limit(10)
       .get();
 
-    const failed = snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        taskId: doc.id,
-        rawGoal: data.rawGoal ?? data.intent?.title ?? 'Untitled task',
-        pipelineStage: data.metadata?.pipelineStage ?? 'unknown',
-        pipelineError: data.metadata?.pipelineError ?? null,
-        checkpointedAt: data.metadata?.checkpointedAt ?? null,
-      };
-    });
+    const failed = snapshot.docs
+      .filter((doc) => doc.data()?.metadata?.archived !== true) // exclude archived
+      .map((doc) => {
+        const data = doc.data();
+        return {
+          taskId: doc.id,
+          rawGoal: data.rawGoal ?? data.intent?.title ?? 'Untitled task',
+          pipelineStage: data.metadata?.pipelineStage ?? 'unknown',
+          pipelineError: data.metadata?.pipelineError ?? null,
+          checkpointedAt: data.metadata?.checkpointedAt ?? null,
+        };
+      });
 
     res.json({ failed });
   } catch (err) {
@@ -140,15 +333,19 @@ router.get('/', requireAuth, async (req, res) => {
     const now = new Date();
     const tasks = snapshot.docs
       // Partial documents left by a failed run are resumable, not real tasks.
-      .filter((doc) => doc.data()?.metadata?.pipelineFailed !== true)
+      // Exclude partial pipeline-failed documents and archived (soft-deleted) tasks.
+      .filter((doc) => {
+        const meta = doc.data()?.metadata ?? {};
+        return meta.pipelineFailed !== true && meta.archived !== true;
+      })
       .map((doc) => {
-      const clientTask = toClientTask(fromFirestoreDocument(doc.data()));
-      const deadline = new Date(clientTask.deadline);
-      return {
-        ...clientTask,
-        hoursRemaining: Math.max(0, Math.round((deadline - now) / 3_600_000 * 10) / 10),
-      };
-    });
+        const clientTask = toClientTask(fromFirestoreDocument(doc.data()));
+        const deadline = new Date(clientTask.deadline);
+        return {
+          ...clientTask,
+          hoursRemaining: Math.max(0, Math.round((deadline - now) / 3_600_000 * 10) / 10),
+        };
+      });
 
     res.json({ tasks });
   } catch (err) {
@@ -246,7 +443,77 @@ router.patch('/:taskId/complete', requireAuth, async (req, res) => {
   }
 });
 
+// ── PATCH /api/tasks/:taskId/calendar-sync ──────────────────────────────────
+// Toggle Google Calendar sync for a single project.
+// Body: { enabled: boolean }
+// - enabled=false: deletes all calendarEventIds from Google Calendar for this
+//   task, clears the calendarEventId fields in Firestore so the task knows it
+//   is un-synced, and persists calendarSync=false.
+// - enabled=true: re-pushes any un-synced scheduledTasks to Google Calendar
+//   and persists calendarSync=true.
+router.patch('/:taskId/calendar-sync', requireAuth, async (req, res) => {
+  const { taskId } = req.params;
+  const { enabled } = req.body ?? {};
+
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: '`enabled` (boolean) is required.' });
+  }
+
+  try {
+    const doc = await db.collection('tasks').doc(taskId).get();
+    if (!doc.exists || doc.data().userId !== req.user.uid)
+      return res.status(404).json({ error: 'Task not found' });
+
+    const context = fromFirestoreDocument(doc.data());
+    let syncedCount = 0;
+
+    if (!enabled) {
+      // Remove existing calendar events
+      const eventIds = (context.schedule?.scheduledTasks ?? [])
+        .map((s) => s.calendarEventId)
+        .filter(Boolean);
+      if (eventIds.length) {
+        try {
+          await deleteCalendarEvents(req.user.uid, eventIds);
+        } catch (calErr) {
+          console.warn('[Tasks PATCH /calendar-sync] Calendar delete failed (non-fatal):', calErr.message);
+        }
+        // Clear the stored calendarEventIds so the task knows it is un-synced
+        (context.schedule?.scheduledTasks ?? []).forEach((s) => { delete s.calendarEventId; });
+      }
+    } else if (context.schedule?.scheduledTasks?.length) {
+      // Re-sync to calendar
+      try {
+        const { syncScheduleToCalendar } = await import('../agents/google_calendar_agent/agent.js');
+        const syncResult = await syncScheduleToCalendar(context, req.user.uid);
+        context.schedule.scheduledTasks = syncResult.scheduledTasks;
+        syncedCount = syncResult.scheduledTasks?.filter((s) => s.calendarEventId).length ?? 0;
+      } catch (calErr) {
+        console.warn('[Tasks PATCH /calendar-sync] Calendar sync failed:', calErr.message);
+        return res.status(502).json({ error: 'Failed to sync with Google Calendar.' });
+      }
+    }
+    // else: no AI schedule yet (e.g. a manually-created project awaiting
+    // "Let AI enhance") — nothing to push to Google Calendar. Just persist
+    // the preference below so sync kicks in once a schedule exists.
+
+    context.metadata = context.metadata ?? {};
+    context.metadata.calendarSync = enabled;
+    context.metadata.updatedAt = new Date().toISOString();
+
+    await doc.ref.set(toFirestoreDocument(context));
+    res.json({ success: true, calendarSync: enabled, syncedCount });
+  } catch (err) {
+    console.error('[Tasks PATCH /calendar-sync]', err);
+    res.status(500).json({ error: 'Failed to update calendar sync setting.' });
+  }
+});
+
 // ── DELETE /api/tasks/:taskId ───────────────────────────────────────────────
+// Soft-delete: sets metadata.archived = true instead of permanently removing
+// the Firestore document. This preserves historical data for the memory agent
+// (which reads task_history, not tasks, but archives retain audit value).
+// Google Calendar events ARE deleted on archive — the user no longer needs them.
 router.delete('/:taskId', requireAuth, async (req, res) => {
   try {
     const doc = await db.collection('tasks').doc(req.params.taskId).get();
@@ -265,11 +532,18 @@ router.delete('/:taskId', requireAuth, async (req, res) => {
       }
     }
 
-    await doc.ref.delete();
+    // Soft-delete: mark archived, never physically remove the document
+    await doc.ref.set({
+      'metadata.archived': true,
+      'metadata.archivedAt': new Date().toISOString(),
+      // Ensure it won't appear in the /failed banner after archiving
+      'metadata.pipelineFailed': false,
+    }, { merge: true });
+
     res.json({ success: true });
   } catch {
-    res.status(500).json({ error: 'Failed to delete task' });
+    res.status(500).json({ error: 'Failed to archive task' });
   }
 });
 
-export default router;
+export default router;

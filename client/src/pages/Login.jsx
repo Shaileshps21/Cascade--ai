@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Login() {
-  const { signInWithGoogle } = useAuth();
+  const { signInWithGoogle, signInWithDifferentAccount } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [switchLoading, setSwitchLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSignIn = async () => {
@@ -21,6 +22,25 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  const handleSwitchAccount = async () => {
+    setSwitchLoading(true);
+    setError('');
+    try {
+      await signInWithDifferentAccount();
+      navigate('/');
+    } catch (err) {
+      // User cancelled the picker — not a real error
+      if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
+        setError('Could not switch account. Please try again.');
+        console.error(err);
+      }
+    } finally {
+      setSwitchLoading(false);
+    }
+  };
+
+  const anyLoading = loading || switchLoading;
 
   return (
     <div className="min-h-screen bg-surface-950 flex flex-col items-center justify-center px-4">
@@ -61,9 +81,10 @@ export default function Login() {
             </div>
           )}
 
+          {/* Primary sign-in button */}
           <button
             onClick={handleSignIn}
-            disabled={loading}
+            disabled={anyLoading}
             className="w-full flex items-center justify-center gap-3 bg-white text-gray-900 font-semibold
                        px-4 py-3 rounded-lg hover:bg-gray-100 transition-all duration-150
                        active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -82,6 +103,28 @@ export default function Login() {
               </svg>
             )}
             {loading ? 'Signing in...' : 'Continue with Google'}
+          </button>
+
+          {/* Switch account link */}
+          <button
+            onClick={handleSwitchAccount}
+            disabled={anyLoading}
+            className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+                       border border-white/10 text-white/50 text-sm
+                       hover:text-white/80 hover:border-white/25 hover:bg-white/5
+                       transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {switchLoading ? (
+              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+            )}
+            {switchLoading ? 'Opening account picker...' : 'Use a different Google account'}
           </button>
 
           <p className="mt-4 text-center text-xs text-white/25">

@@ -4,6 +4,7 @@ import Header from './components/Header.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import ProjectWorkspace from './pages/ProjectWorkspace.jsx';
 import TaskWorkspace from './pages/TaskWorkspace.jsx';
+import ManualProjectBuilder from './pages/ManualProjectBuilder.jsx';
 import Login from './pages/Login.jsx';
 
 // ── Loading screen ─────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ function AppLayout() {
       <main>
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/projects/new/manual" element={<ManualProjectBuilder />} />
           <Route path="/projects/:projectId" element={<ProjectWorkspace />} />
           <Route path="/projects/:projectId/tasks/:taskId" element={<TaskWorkspace />} />
           <Route path="*" element={<Navigate to="/" replace />} />

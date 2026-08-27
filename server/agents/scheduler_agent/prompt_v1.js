@@ -24,7 +24,8 @@
  * @param {number|null} opts.projectDurationDays
  * @param {string} opts.createdAtISO    - context.metadata.createdAt
  * @param {string|null} opts.deadlineISO
- * @param {number} opts.dailyAvailableMinutes - the assumed daily capacity (see DEFAULT_DAILY_AVAILABLE_MINUTES)
+ * @param {number} opts.dailyAvailableMinutes - the assumed daily capacity (user-set or default)
+ * @param {string} [opts.weekendMode]         - 'skip' | 'light' | 'normal' | 'heavy'
  * @param {number} opts.workStartHour
  * @param {number} opts.workEndHour
  * @returns {string} prompt
@@ -39,6 +40,7 @@ export function buildSchedulerPrompt({
     createdAtISO,
     deadlineISO,
     dailyAvailableMinutes,
+    weekendMode = 'skip',
     workStartHour,
     workEndHour,
 }) {
@@ -46,6 +48,14 @@ export function buildSchedulerPrompt({
     const reliabilityScore = memory?.reliabilityScore ?? null;
     const commonFailures = memory?.commonFailures ?? [];
     const averageSpeeds = memory?.averageSpeeds ?? null;
+
+    const weekendLabel = weekendMode === 'skip'
+        ? 'Skip weekends entirely — do NOT place any tasks on Saturday or Sunday'
+        : weekendMode === 'light'
+            ? 'Light weekend mode — weekend tasks allowed but capped at 50% of daily capacity; prefer lighter/review tasks on weekends'
+            : weekendMode === 'heavy'
+                ? 'Weekend-heavy mode — place MORE tasks on Saturdays and Sundays (150% of weekday capacity). Treat weekends as the primary working days and use them to make the most progress. Weekdays can be lighter as a result.'
+                : 'Normal weekend mode — weekends are treated identically to weekdays';
 
     return `You are the Intelligent Scheduling Agent — an expert project-management AI that turns a task list into a realistic, humane, deadline-aware calendar schedule.
 
@@ -55,7 +65,8 @@ export function buildSchedulerPrompt({
 - Project duration: ${projectDurationDays !== null && projectDurationDays !== undefined ? `${projectDurationDays.toFixed(1)} days` : 'unknown'}
 - Required buffer reservation: ${Math.round(bufferPercent * 100)}% of total scheduled time
 - Working hours: ${workStartHour}:00–${workEndHour}:00 local time
-- Assumed daily available capacity: ${dailyAvailableMinutes} minutes/day (never schedule more than 70% of this per day)
+- Daily capacity: ${dailyAvailableMinutes} minutes/day (never schedule more than 70% of this per day = ~${Math.round(dailyAvailableMinutes * 0.7)} min)
+- Weekend preference: ${weekendLabel}
 - Historically productive hours (from memory agent): ${optimalWorkHours.join(', ')}
 ${reliabilityScore !== null ? `- User reliability score (historical on-time completion): ${reliabilityScore}` : ''}
 ${commonFailures.length ? `- Common historical failure patterns to avoid: ${commonFailures.join('; ')}` : ''}

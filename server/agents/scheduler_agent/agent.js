@@ -38,19 +38,28 @@ export const WORK_END_HOUR = 21;
 export const FIRST_TASK_DELAY_MINUTES = 30;
 export const DEFAULT_TASK_DURATION_MINUTES = 30;
 export const SLOT_GAP_MINUTES = 10;
-// No explicit per-user availability preference exists on PlanningContext yet
-// (a future `context.preferences.availableHoursPerDay` could override this).
-// Documented default: 2 hours/day, applied uniformly to every day for now.
-// Deliberately conservative — most users doing a side task alongside their
-// regular day don't actually have 6 free hours/day, and a generous daily
-// capacity here is exactly what was causing multi-day (even multi-week)
-// projects to get crammed into the first day or two of the schedule instead
-// of spreading evenly toward the deadline.
+// Per-user availability: default 2 hours/day. Overridden by
+// context.preferences.availableHoursPerDay (set from SchedulePreferences).
+// Deliberately conservative — see comment history for reasoning.
 export const DEFAULT_DAILY_AVAILABLE_HOURS = 2;
 export const DEFAULT_DAILY_AVAILABLE_MINUTES = DEFAULT_DAILY_AVAILABLE_HOURS * 60;
 // Rule: never schedule more than 70% of daily available time.
 export const MAX_DAILY_UTILIZATION = 0.7;
 export const LOW_SCHEDULING_SCORE_THRESHOLD = 70;
+
+// ── Weekend scheduling modes ──────────────────────────────────────────────────
+// 'skip'   → Skip weekends entirely; cursor jumps to Monday. (default)
+// 'light'  → Allow weekends but cap at WEEKEND_LIGHT_BUDGET_FRACTION of daily budget.
+// 'normal' → Weekends are treated identically to weekdays — full capacity.
+// 'heavy'  → Weekends receive WEEKEND_HEAVY_BUDGET_FRACTION of daily budget (more tasks than weekdays).
+export const WEEKEND_MODES = ['skip', 'light', 'normal', 'heavy'];
+export const DEFAULT_WEEKEND_MODE = 'skip';
+// Fraction of weekday capacity used on Sat/Sun in 'light' mode (50%).
+export const WEEKEND_LIGHT_BUDGET_FRACTION = 0.5;
+// Fraction of weekday capacity used on Sat/Sun in 'heavy' mode (150%).
+// The scheduler places 50% MORE work on weekends so the user can use
+// their free weekend days to make the most progress.
+export const WEEKEND_HEAVY_BUDGET_FRACTION = 1.5;
 
 // ── Day-person / night-person working-hour presets ────────────────────────
 // 24 as an end hour is deliberate and safe: JS `Date#setHours(24, 0, 0, 0)`
@@ -64,13 +73,14 @@ export const WORK_STYLE_PRESETS = {
 };
 
 /**
- * Resolve the working-hours window to schedule within, from the user's
- * saved preference (`context.preferences.workStyle`, one of
- * WORK_STYLE_PRESETS' keys) or explicit hour overrides
- * (`context.preferences.workStartHour`/`workEndHour`). Falls back to the
- * default 'flexible' window when no preference has been set.
+ * Resolve all scheduling preferences from context.preferences:
+ *  - workStartHour / workEndHour  (day/flexible/night style)
+ *  - weekendMode                  ('skip' | 'light' | 'normal')
+ *  - dailyAvailableMinutes        (from availableHoursPerDay, defaults to 2h)
+ *
+ * Falls back to safe defaults when no preference has been saved.
  * @param {object} context - PlanningContext
- * @returns {{ workStartHour: number, workEndHour: number, workStyle: string }}
+ * @returns {{ workStartHour: number, workEndHour: number, workStyle: string, weekendMode: string, dailyAvailableMinutes: number }}
  */
 export function resolveWorkingHours(context) {
     const prefs = context?.preferences ?? {};
@@ -79,8 +89,20 @@ export function resolveWorkingHours(context) {
     const workStartHour = typeof prefs.workStartHour === 'number' ? prefs.workStartHour : preset.workStartHour;
     const workEndHour = typeof prefs.workEndHour === 'number' ? prefs.workEndHour : preset.workEndHour;
 
-    return { workStartHour, workEndHour, workStyle: prefs.workStyle ?? 'flexible' };
+    const weekendMode = WEEKEND_MODES.includes(prefs.weekendMode)
+        ? prefs.weekendMode
+        : DEFAULT_WEEKEND_MODE;
+
+    // availableHoursPerDay set by user in SchedulePreferences (0.5–12h).
+    // Clamped to [0.5, 12] in case of stale/bad data. Converts to minutes.
+    const rawHours = prefs.availableHoursPerDay;
+    const dailyAvailableMinutes = typeof rawHours === 'number' && rawHours > 0
+        ? Math.round(Math.min(12, Math.max(0.5, rawHours)) * 60)
+        : DEFAULT_DAILY_AVAILABLE_MINUTES;
+
+    return { workStartHour, workEndHour, workStyle: prefs.workStyle ?? 'flexible', weekendMode, dailyAvailableMinutes };
 }
+
 
 // Re-export the buffer/dependency validators so callers of agent.js (and
 // agent.test.js) can import everything from a single place if convenient.
@@ -105,50 +127,73 @@ export function isWithinWorkingHours(date, workStartHour = WORK_START_HOUR, work
 }
 
 /**
+ * True if `date` falls on a Saturday (6) or Sunday (0).
+ * @param {string|Date} date
+ * @returns {boolean}
+ */
+export function isWeekend(date) {
+    const d = new Date(date);
+    const day = d.getDay();
+    return day === 0 || day === 6; // Sunday=0, Saturday=6
+}
+
+/**
  * Push a date forward to the next working-hours window if it currently
  * falls outside one (before work-start → same day at work-start; at/after
- * work-end → next day at work-start).
+ * work-end → next day at work-start). In 'skip' weekend mode, Saturday and
+ * Sunday are advanced to the following Monday before the hour check.
  * @param {Date} date
  * @param {number} workStartHour
  * @param {number} workEndHour
+ * @param {string} [weekendMode] - 'skip' | 'light' | 'normal'
  * @returns {Date}
  */
-function clampToWorkingHours(date, workStartHour, workEndHour) {
-    const dayStart = new Date(date);
+function clampToWorkingHours(date, workStartHour, workEndHour, weekendMode = DEFAULT_WEEKEND_MODE) {
+    let cursor = new Date(date);
+
+    // In skip mode advance any weekend day to the following Monday.
+    if (weekendMode === 'skip') {
+        while (isWeekend(cursor)) {
+            cursor.setDate(cursor.getDate() + 1);
+            cursor.setHours(workStartHour, 0, 0, 0);
+        }
+    }
+
+    const dayStart = new Date(cursor);
     dayStart.setHours(workStartHour, 0, 0, 0);
-    const dayEnd = new Date(date);
+    const dayEnd = new Date(cursor);
     dayEnd.setHours(workEndHour, 0, 0, 0);
 
-    if (date < dayStart) return new Date(dayStart);
-    if (date >= dayEnd) {
-        const next = new Date(date);
-        next.setDate(next.getDate() + 1);
-        next.setHours(workStartHour, 0, 0, 0);
-        return next;
+    if (cursor < dayStart) return new Date(dayStart);
+    if (cursor >= dayEnd) {
+        // Roll to next day, then re-check for weekends in skip mode.
+        cursor.setDate(cursor.getDate() + 1);
+        cursor.setHours(workStartHour, 0, 0, 0);
+        return clampToWorkingHours(cursor, workStartHour, workEndHour, weekendMode);
     }
-    return new Date(date);
+    return new Date(cursor);
 }
 
 /**
  * Find the next free slot of `durationMinutes` starting at/after `fromDate`,
- * respecting working hours and avoiding `busySlots` (Google Calendar
- * free/busy blocks, [{start, end}] as ISO strings or Dates). Ported/adapted
- * from the old schedulerAgent.js's computeFreeSlots() cursor-walk logic.
+ * respecting working hours, weekend mode, and avoiding `busySlots` (Google
+ * Calendar free/busy blocks [{start, end}] as ISO strings or Dates).
  *
  * @param {string|Date} fromDate
  * @param {number} durationMinutes
  * @param {Array<{start:string|Date, end:string|Date}>} [busySlots]
  * @param {number} [workStartHour]
  * @param {number} [workEndHour]
+ * @param {string} [weekendMode] - 'skip' | 'light' | 'normal'
  * @returns {{ start: Date, end: Date }}
  */
-export function findNextFreeSlot(fromDate, durationMinutes, busySlots = [], workStartHour = WORK_START_HOUR, workEndHour = WORK_END_HOUR) {
+export function findNextFreeSlot(fromDate, durationMinutes, busySlots = [], workStartHour = WORK_START_HOUR, workEndHour = WORK_END_HOUR, weekendMode = DEFAULT_WEEKEND_MODE) {
     const sortedBusy = (busySlots ?? [])
         .map(b => ({ start: new Date(b.start), end: new Date(b.end) }))
         .filter(b => !Number.isNaN(b.start.getTime()) && !Number.isNaN(b.end.getTime()))
         .sort((a, b) => a.start - b.start);
 
-    let cursor = clampToWorkingHours(new Date(fromDate), workStartHour, workEndHour);
+    let cursor = clampToWorkingHours(new Date(fromDate), workStartHour, workEndHour, weekendMode);
     const maxIterations = 2000; // safety guard against pathological input
 
     for (let i = 0; i < maxIterations; i++) {
@@ -157,11 +202,12 @@ export function findNextFreeSlot(fromDate, durationMinutes, busySlots = [], work
         const candidateEnd = new Date(cursor.getTime() + durationMinutes * 60_000);
 
         if (candidateEnd > dayEnd) {
-            // Doesn't fit before the end of the working day — try tomorrow.
+            // Doesn't fit before end of working day — try next valid day.
+            // clampToWorkingHours handles both after-hours clamping AND weekend skip.
             const next = new Date(cursor);
             next.setDate(next.getDate() + 1);
             next.setHours(workStartHour, 0, 0, 0);
-            cursor = next;
+            cursor = clampToWorkingHours(next, workStartHour, workEndHour, weekendMode);
             continue;
         }
 
@@ -171,6 +217,7 @@ export function findNextFreeSlot(fromDate, durationMinutes, busySlots = [], work
                 new Date(Math.max(conflict.end.getTime(), cursor.getTime() + 60_000)),
                 workStartHour,
                 workEndHour,
+                weekendMode,
             );
             continue;
         }
@@ -237,12 +284,13 @@ export function computeAvailableMinutes(fromDate, toDate, dailyAvailableMinutes 
  * grossly impossible deadline never even reaches the model — per the spec,
  * an unrealistic schedule must never be produced.
  * @param {object} context
+ * @param {number} [dailyAvailableMinutes] - resolved from user preferences; defaults to constant
  * @returns {{
  *   isFeasible: boolean, totalEffortMinutes: number, availableMinutes: number|null,
  *   requiredAdditionalMinutes: number, createdAt: Date, deadlineDate: Date|null
  * }}
  */
-export function checkDeadlineFeasibility(context) {
+export function checkDeadlineFeasibility(context, dailyAvailableMinutes = DEFAULT_DAILY_AVAILABLE_MINUTES) {
     const createdAt = new Date(context?.metadata?.createdAt ?? Date.now());
     const deadline = context?.intent?.deadline ?? context?.explicitDeadline;
     const totalEffortMinutes = computeTotalEffortMinutes(context);
@@ -256,7 +304,7 @@ export function checkDeadlineFeasibility(context) {
         return { isFeasible: true, totalEffortMinutes, availableMinutes: null, requiredAdditionalMinutes: 0, createdAt, deadlineDate: null };
     }
 
-    const availableMinutes = computeAvailableMinutes(createdAt, deadlineDate);
+    const availableMinutes = computeAvailableMinutes(createdAt, deadlineDate, dailyAvailableMinutes);
     const isFeasible = totalEffortMinutes <= availableMinutes;
     const requiredAdditionalMinutes = Math.max(0, totalEffortMinutes - availableMinutes);
 
@@ -328,12 +376,13 @@ export function buildFailureConditions(feasibilityCheck, context) {
  *
  * @param {object} context
  * @param {Array<{start:string|Date, end:string|Date}>} [busySlots]
- * @param {number} [dailyBudgetMinutes] - max minutes of work placed per calendar day
+ * @param {number} [dailyBudgetMinutes] - max minutes of work placed per calendar day (weekdays)
  * @param {number} [workStartHour] - start of the user's working-hours window (day/night preference)
  * @param {number} [workEndHour] - end of the user's working-hours window (day/night preference)
+ * @param {string} [weekendMode] - 'skip' | 'light' | 'normal'
  * @returns {Array<object>} skeleton entries (see shape below)
  */
-export function buildScheduleSkeleton(context, busySlots = [], dailyBudgetMinutes = DEFAULT_DAILY_AVAILABLE_MINUTES, workStartHour = WORK_START_HOUR, workEndHour = WORK_END_HOUR) {
+export function buildScheduleSkeleton(context, busySlots = [], dailyBudgetMinutes = DEFAULT_DAILY_AVAILABLE_MINUTES, workStartHour = WORK_START_HOUR, workEndHour = WORK_END_HOUR, weekendMode = DEFAULT_WEEKEND_MODE) {
     const planningTasks = context?.planning?.tasks ?? [];
     if (planningTasks.length === 0) return [];
 
@@ -364,16 +413,27 @@ export function buildScheduleSkeleton(context, busySlots = [], dailyBudgetMinute
             : (typeof task.estimatedMinutes === 'number' ? task.estimatedMinutes : DEFAULT_TASK_DURATION_MINUTES);
         const estimatedDuration = typeof task.estimatedMinutes === 'number' ? task.estimatedMinutes : adjustedDuration;
 
+        // Effective daily budget per weekend mode:
+        //   skip   → clampToWorkingHours already prevents landing on weekends; budget unchanged.
+        //   light  → 50% of weekday budget on Sat/Sun.
+        //   normal → same as weekday (unchanged).
+        //   heavy  → 150% of weekday budget on Sat/Sun (more tasks than a typical weekday).
+        const effectiveBudget = isWeekend(cursor)
+            ? (weekendMode === 'light'  ? Math.round(dailyBudgetMinutes * WEEKEND_LIGHT_BUDGET_FRACTION)
+            :  weekendMode === 'heavy'  ? Math.round(dailyBudgetMinutes * WEEKEND_HEAVY_BUDGET_FRACTION)
+            :                            dailyBudgetMinutes)   // 'normal' or 'skip' (skip never lands here)
+            : dailyBudgetMinutes;
+
         // Today's budget is spent (or this task alone would blow past it) —
-        // roll forward to tomorrow's work-start before looking for a slot.
-        if (minutesScheduledToday > 0 && minutesScheduledToday + adjustedDuration > dailyBudgetMinutes) {
+        // roll forward to the next valid work-start before looking for a slot.
+        if (minutesScheduledToday > 0 && minutesScheduledToday + adjustedDuration > effectiveBudget) {
             const next = new Date(cursor);
             next.setDate(next.getDate() + 1);
             next.setHours(workStartHour, 0, 0, 0);
-            cursor = next;
+            cursor = clampToWorkingHours(next, workStartHour, workEndHour, weekendMode);
         }
 
-        const slot = findNextFreeSlot(cursor, adjustedDuration, busySlots, workStartHour, workEndHour);
+        const slot = findNextFreeSlot(cursor, adjustedDuration, busySlots, workStartHour, workEndHour, weekendMode);
 
         const slotDayKey = slot.start.toDateString();
         if (slotDayKey !== dayKey) {
@@ -546,8 +606,11 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
         sseEmit,
         maxRetries: 1,
         agentFn: async (ctx, llm) => {
-            // ── Resolve the user's day-person/night-person working-hours window ──
-            const { workStartHour, workEndHour } = resolveWorkingHours(ctx);
+            // ── Resolve all scheduling preferences at once ────────────────────
+            // resolveWorkingHours now returns workStartHour, workEndHour,
+            // workStyle, weekendMode, and dailyAvailableMinutes — all derived
+            // from context.preferences (saved via SchedulePreferences UI).
+            const { workStartHour, workEndHour, weekendMode, dailyAvailableMinutes } = resolveWorkingHours(ctx);
 
             // ── Deterministic feasibility guard — never let the LLM invent an
             //    unrealistic schedule when the deadline is already impossible.
@@ -557,10 +620,10 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
             //    keeps placing tasks on later and later days once earlier days'
             //    budgets are used up, with no upper bound) and hand that back as
             //    the real schedule, alongside the infeasibility warnings. ──
-            const feasibilityCheck = checkDeadlineFeasibility(ctx);
+            const feasibilityCheck = checkDeadlineFeasibility(ctx, dailyAvailableMinutes);
             if (!feasibilityCheck.isFeasible) {
                 const failureConditions = buildFailureConditions(feasibilityCheck, ctx);
-                const fallbackSkeleton = buildScheduleSkeleton(ctx, busySlots, DEFAULT_DAILY_AVAILABLE_MINUTES, workStartHour, workEndHour);
+                const fallbackSkeleton = buildScheduleSkeleton(ctx, busySlots, dailyAvailableMinutes, workStartHour, workEndHour, weekendMode);
                 return {
                     schemaVersion: SCHEMA_VERSION,
                     scheduledTasks: fallbackSkeleton.map(s => ({
@@ -577,7 +640,7 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
                     failureConditions,
                     reasoning: {
                         confidence: 0.9,
-                        assumptions: [`Assumed ${DEFAULT_DAILY_AVAILABLE_HOURS}h/day available capacity at ${Math.round(MAX_DAILY_UTILIZATION * 100)}% utilization, within the ${workStartHour}:00–${workEndHour}:00 working-hours window.`],
+                        assumptions: [`Assumed ${Math.round(dailyAvailableMinutes / 60 * 10) / 10}h/day available capacity at ${Math.round(MAX_DAILY_UTILIZATION * 100)}% utilization, within the ${workStartHour}:00–${workEndHour}:00 window. Weekend mode: ${weekendMode}.`],
                         warnings: ['Deadline determined infeasible by deterministic pre-check — used the deterministic skeleton (no LLM refinement) so the schedule still spreads work across real days instead of being empty.'],
                         promptVersion: PROMPT_VERSION,
                     },
@@ -585,7 +648,7 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
             }
 
             // ── Build deterministic skeleton + call the LLM for refinement ────
-            const skeleton = buildScheduleSkeleton(ctx, busySlots, DEFAULT_DAILY_AVAILABLE_MINUTES, workStartHour, workEndHour);
+            const skeleton = buildScheduleSkeleton(ctx, busySlots, dailyAvailableMinutes, workStartHour, workEndHour, weekendMode);
             const taskMeta = buildTaskMeta(ctx);
             const createdAt = new Date(ctx?.metadata?.createdAt ?? Date.now());
             const deadline = ctx?.intent?.deadline ?? ctx?.explicitDeadline ?? null;
@@ -599,7 +662,8 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
                 projectDurationDays,
                 createdAtISO: createdAt.toISOString(),
                 deadlineISO: deadline,
-                dailyAvailableMinutes: DEFAULT_DAILY_AVAILABLE_MINUTES,
+                dailyAvailableMinutes,
+                weekendMode,
                 workStartHour,
                 workEndHour,
             });

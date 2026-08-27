@@ -143,6 +143,12 @@ export default function TaskWorkspace() {
             <span className={`text-xs font-semibold capitalize ${DIFFICULTY_COLOR[task.difficulty] || 'text-white/40'}`}>{task.difficulty?.replace('_', ' ')}</span>
             <span className="text-white/15">·</span>
             <span className="text-xs text-white/40 capitalize">{task.priority} priority</span>
+            {task.deadline && (
+              <>
+                <span className="text-white/15">·</span>
+                <span className="text-xs text-white/40">Due {format(new Date(task.deadline), 'MMM d, yyyy')}</span>
+              </>
+            )}
             {task.status === 'completed' && <span className="text-xs text-emerald-400">· ✓ Completed</span>}
           </div>
           <h1 className="text-2xl font-bold text-white">{task.title}</h1>

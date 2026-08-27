@@ -46,6 +46,21 @@ export function AuthProvider({ children }) {
     return result.user;
   };
 
+  /**
+   * Force the Google account-picker popup so the user can switch to a
+   * different Google account. Signs out first to clear any cached
+   * credential, then opens the picker with prompt:'select_account'.
+   */
+  const signInWithDifferentAccount = async () => {
+    // Sign out first to clear Firebase's cached credential for the current
+    // account — otherwise the popup may silently re-use the same account.
+    await signOut(auth);
+    const provider = Object.assign(Object.create(Object.getPrototypeOf(googleProvider)), googleProvider);
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const result = await signInWithPopup(auth, provider);
+    return result.user;
+  };
+
   const logout = async () => {
     await signOut(auth);
   };
@@ -60,7 +75,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signInWithGoogle, logout, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, loading, signInWithGoogle, signInWithDifferentAccount, logout, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
