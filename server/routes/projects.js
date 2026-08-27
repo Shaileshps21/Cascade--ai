@@ -62,6 +62,11 @@ router.get('/', requireAuth, async (req, res) => {
             // real projects and must not render as half-empty cards; they are
             // reachable through POST /api/tasks/:taskId/resume.
             .filter((doc) => doc.data()?.metadata?.pipelineFailed !== true)
+            // Archived (soft-deleted) projects: the archive flow only ever
+            // removed these from the /api/tasks list, never from this one —
+            // the Dashboard calls this endpoint, so an archived project would
+            // silently reappear on the next full page load.
+            .filter((doc) => doc.data()?.metadata?.archived !== true)
             .map((doc) => {
             const context = fromFirestoreDocument(doc.data());
             const project = toClientProject(context);
