@@ -111,6 +111,14 @@ export const reorderModuleTasks = (projectId, moduleId, taskIds) =>
     body: JSON.stringify({ taskIds }),
   });
 
+// Quick-Add Subtask: append one subtask to a module with no AI pipeline run.
+// Works the same for manually-built and AI-generated projects.
+export const addModuleTask = (projectId, moduleId, { title, estimatedMinutes, priority } = {}) =>
+  apiFetch(`/api/projects/${projectId}/tasks`, {
+    method: 'POST',
+    body: JSON.stringify({ moduleId, title, estimatedMinutes, priority }),
+  });
+
 // ── Calendar ──────────────────────────────────────────────────────────────────
 export const getCalendarStatus = () => apiFetch('/api/calendar/status');
 export const getCalendarEvents = () => apiFetch('/api/calendar/events');

@@ -16,7 +16,29 @@ let uid = 0;
 const nextId = () => `local-${++uid}-${Date.now()}`;
 
 function newSubtask() {
-  return { id: nextId(), title: '', estimatedMinutes: '', priority: 'medium', deadline: '', startTime: '' };
+  return {
+    id: nextId(),
+    title: '',
+    estimatedMinutes: '',
+    priority: 'medium',
+    // Start date/time are kept as two separate native inputs (rather than one
+    // datetime-local) so each can carry its own visible label — combined into
+    // one ISO startTime only at save time, once both halves are filled in.
+    startDate: '',
+    startTimeOfDay: '',
+    deadline: '', // "End Date (optional)" — a calendar-day cap on the subtask, not a precise end time.
+  };
+}
+
+// Small labeled-field wrapper shared by every subtask input so each one gets
+// a real visible label instead of relying on a placeholder or title tooltip.
+function Field({ label, width = '', children }) {
+  return (
+    <div className={`flex flex-col gap-1 ${width}`}>
+      <label className="text-[10px] text-muted uppercase tracking-wide font-semibold">{label}</label>
+      {children}
+    </div>
+  );
 }
 
 function newModule() {
@@ -49,7 +71,7 @@ export default function ManualProjectBuilder() {
   const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
   const totalSubtasks = modules.reduce((n, m) => n + m.subtasks.length, 0);
   const scheduledSubtasks = modules.reduce(
-    (n, m) => n + m.subtasks.filter((s) => s.title.trim() && s.startTime).length,
+    (n, m) => n + m.subtasks.filter((s) => s.title.trim() && s.startDate && s.startTimeOfDay).length,
     0
   );
   // Calendar sync fires immediately on save only when every titled subtask
@@ -99,7 +121,9 @@ export default function ManualProjectBuilder() {
             estimatedMinutes: s.estimatedMinutes ? Number(s.estimatedMinutes) : undefined,
             priority: s.priority,
             deadline: s.deadline ? new Date(s.deadline).toISOString() : undefined,
-            startTime: s.startTime ? new Date(s.startTime).toISOString() : undefined,
+            startTime: (s.startDate && s.startTimeOfDay)
+              ? new Date(`${s.startDate}T${s.startTimeOfDay}`).toISOString()
+              : undefined,
           })),
       }))
       .filter((m) => m.title && m.subtasks.length > 0);
@@ -213,51 +237,68 @@ export default function ManualProjectBuilder() {
               )}
             </div>
 
-            <div className="space-y-2 pl-2 sm:pl-6 border-l border-border">
+            <div className="space-y-4 pl-2 sm:pl-6 border-l border-border">
               {mod.subtasks.map((st) => (
-                <div key={st.id} className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                  <input
-                    value={st.title}
-                    onChange={(e) => updateSubtask(mod.id, st.id, { title: e.target.value })}
-                    placeholder="Subtask title"
-                    className="input-field flex-1 min-w-[140px] text-sm py-1.5"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="5"
-                    value={st.estimatedMinutes}
-                    onChange={(e) => updateSubtask(mod.id, st.id, { estimatedMinutes: e.target.value })}
-                    placeholder="min"
-                    className="input-field w-20 text-sm py-1.5"
-                    title="Estimated minutes"
-                  />
-                  <select
-                    value={st.priority}
-                    onChange={(e) => updateSubtask(mod.id, st.id, { priority: e.target.value })}
-                    className={`input-field w-28 text-xs py-1.5 capitalize border ${PRIORITY_STYLES[st.priority] || ''}`}
-                  >
-                    {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                  <input
-                    type="date"
-                    value={st.deadline}
-                    onChange={(e) => updateSubtask(mod.id, st.id, { deadline: e.target.value })}
-                    className="input-field w-36 text-xs py-1.5"
-                    title="Subtask deadline (optional)"
-                  />
-                  <input
-                    type="datetime-local"
-                    value={st.startTime}
-                    onChange={(e) => updateSubtask(mod.id, st.id, { startTime: e.target.value })}
-                    className="input-field w-44 text-xs py-1.5"
-                    title="Start time (optional) — set this to place the subtask on your calendar"
-                  />
+                <div key={st.id} className="flex items-start gap-2 pb-3 border-b border-border/60 last:border-0 last:pb-0">
+                  <div className="flex-1 flex flex-wrap items-end gap-x-3 gap-y-2">
+                    <Field label="Subtask" width="flex-1 min-w-[160px]">
+                      <input
+                        value={st.title}
+                        onChange={(e) => updateSubtask(mod.id, st.id, { title: e.target.value })}
+                        placeholder="Subtask title"
+                        className="input-field text-sm py-1.5"
+                      />
+                    </Field>
+                    <Field label="Priority" width="w-28">
+                      <select
+                        value={st.priority}
+                        onChange={(e) => updateSubtask(mod.id, st.id, { priority: e.target.value })}
+                        className={`input-field text-xs py-1.5 capitalize border ${PRIORITY_STYLES[st.priority] || ''}`}
+                      >
+                        {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="Est. minutes" width="w-24">
+                      <input
+                        type="number"
+                        min="0"
+                        step="5"
+                        value={st.estimatedMinutes}
+                        onChange={(e) => updateSubtask(mod.id, st.id, { estimatedMinutes: e.target.value })}
+                        placeholder="30"
+                        className="input-field text-sm py-1.5"
+                      />
+                    </Field>
+                    <Field label="Start Date" width="w-36">
+                      <input
+                        type="date"
+                        value={st.startDate}
+                        onChange={(e) => updateSubtask(mod.id, st.id, { startDate: e.target.value })}
+                        className="input-field text-xs py-1.5"
+                      />
+                    </Field>
+                    <Field label="Start Time" width="w-28">
+                      <input
+                        type="time"
+                        value={st.startTimeOfDay}
+                        onChange={(e) => updateSubtask(mod.id, st.id, { startTimeOfDay: e.target.value })}
+                        className="input-field text-xs py-1.5"
+                      />
+                    </Field>
+                    <Field label="End Date (optional)" width="w-36">
+                      <input
+                        type="date"
+                        value={st.deadline}
+                        onChange={(e) => updateSubtask(mod.id, st.id, { deadline: e.target.value })}
+                        className="input-field text-xs py-1.5"
+                      />
+                    </Field>
+                  </div>
                   {mod.subtasks.length > 1 && (
                     <button
                       type="button"
                       onClick={() => removeSubtask(mod.id, st.id)}
-                      className="text-muted hover:text-danger transition-colors px-1 flex-shrink-0"
+                      className="text-muted hover:text-danger transition-colors px-1 pt-6 flex-shrink-0"
                       title="Remove subtask"
                     >
                       ✕
@@ -268,7 +309,7 @@ export default function ManualProjectBuilder() {
               <button
                 type="button"
                 onClick={() => addSubtask(mod.id)}
-                className="text-xs text-brand-500 hover:text-brand-400 transition-colors"
+                className="block text-xs text-brand-500 hover:text-brand-400 transition-colors"
               >
                 + Add subtask
               </button>

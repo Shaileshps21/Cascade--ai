@@ -13,6 +13,33 @@ rather than left implied.
 
 ---
 
+## 2026-08-29 — Quick-Add Subtask; Manual Project Builder date/time UI redesign ✅
+
+**Quick-Add Subtask.** New capability: append a single subtask to an existing module — on an AI-generated *or* manually-built project — without running any agent. For when the user notices a step the plan missed and wants to add it in one line rather than resubmitting or re-enhancing the whole project.
+
+- `POST /api/projects/:projectId/tasks` (body: `{ moduleId, title, estimatedMinutes?, priority? }`) locates the module across the project's milestones, generates the next `T<n>` taskId, appends a full task object (one execution step, `not_started` progress — same shape planning_agent/Manual Project Builder already produce), and returns it in the same shape `toClientTask()` gives every other task, so it opens, completes, and drags exactly like any other.
+- Pure taskId-generation/task-building logic extracted into `server/agents/shared/quickAddTask.js` (`nextTaskId()`, `buildQuickAddTask()`) — mirrors why `applyStepUpdate()` was pulled out of the same route file: so it's unit-testable without Firestore. 9 new tests in `quickAddTask.test.js`.
+- Client: `RoadmapTree.jsx`'s `ModuleBlock` gained a one-line "Quick-add a subtask… (Enter to save)" input at the bottom of each expanded module's task list; `addModuleTask()` added to `api/index.js`.
+- Verified live via Claude-in-Chrome against both project types: added "Double-check hotfix in staging before deploy" to an AI-generated project's module (got `T10`, survived a full page reload, opened correctly in the Task Workspace with 1 execution step and a working "Start Working" button), and "Revise sliding window pattern" to a manually-built project's module (task count 1→2, correctly non-draggable-then-draggable as the count crossed 1).
+
+**Manual Project Builder — subtask row redesign.** The subtask row previously packed 5 unlabeled fields (title, minutes via placeholder-only "min", priority, a `date` "deadline", and a `datetime-local` "start time") onto one cramped horizontal line with no visible labels — only tooltips. Redesigned per explicit user layout request:
+- Module name stays on its own line (unchanged).
+- Below it, one labeled field group per subtask: **Subtask**, **Priority**, **Est. minutes**, **Start Date**, **Start Time**, **End Date (optional)** — each with a real uppercase label above it (a shared `Field` wrapper component), wrapping responsively instead of a single unlabeled `sm:flex-nowrap` row.
+- The single `datetime-local` "start time" input was split into two native inputs — `type="date"` (Start Date) and `type="time"` (Start Time) — stored as separate `startDate`/`startTimeOfDay` state so each can carry its own label; combined into one ISO `startTime` only at save time, and only once *both* halves are filled (an incomplete pair is treated as "not yet scheduled," matching the existing all-subtasks-must-have-a-time gate for immediate calendar sync — see the entry below).
+- The old `deadline` date field is now explicitly labeled **End Date (optional)** rather than relying on a tooltip.
+- "+ Add subtask" moved to its own clearly separated line below the field group, per the requested layout.
+
+**Files changed:**
+- `server/agents/shared/quickAddTask.js` (new), `server/agents/shared/quickAddTask.test.js` (new)
+- `server/routes/projects.js` — `POST /:projectId/tasks`
+- `client/src/api/index.js` — `addModuleTask()`
+- `client/src/components/RoadmapTree.jsx` — `QuickAddSubtask` component + wiring
+- `client/src/pages/ManualProjectBuilder.jsx` — subtask row redesign (`Field` wrapper, split start date/time inputs)
+
+**Verified:** full server suite 393/393 passing (9 new). `client` production build succeeds. Both features exercised live via Claude-in-Chrome against real projects (one AI-generated, one manual) as described above; the only console errors present during that session were pre-existing `Failed to fetch` noise from a local `.env` CORS mismatch (`CLIENT_URL` pointed at the production URL, not `localhost:5173`) — unrelated to this change and not touched here, since it's a local-environment setting rather than application code.
+
+---
+
 ## 2026-08-29 — Scheduler still spread a one-day request across a week; manual projects never reached Google Calendar ✅
 
 **Trigger.** Two follow-up reports on the same day as the entries below. First: the user re-ran essentially the same one-day scheduling scenario the entries below were built around (09:00–18:00 hours, a client call, lunch, a 90-minute focus/15-minute break rule, five tasks totaling ~5.75h) and the scheduler still came back spreading one task per day across `Aug 30`–`Sep 4`, starting at `07:00`, instead of a single 09:00–18:00 day. Second: manually-created projects (`ManualProjectBuilder` / `POST /api/tasks/manual`) never synced to Google Calendar even with sync enabled and subtask times filled in.

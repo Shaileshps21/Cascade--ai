@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { GripVertical } from 'lucide-react';
-import { reorderModuleTasks } from '../api/index.js';
+import { GripVertical, Plus } from 'lucide-react';
+import { reorderModuleTasks, addModuleTask } from '../api/index.js';
 
 const RISK_DOT = { high: 'bg-danger', medium: 'bg-warning', low: 'bg-success' };
 const STATUS_LABEL = { not_started: 'Not started', in_progress: 'In progress', completed: 'Completed' };
@@ -57,7 +57,48 @@ function TaskRow({ projectId, task, draggable, isDragging, isDropTarget, onDragS
   );
 }
 
-function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks }) {
+// QuickAddSubtask — one-line input to append a subtask to this module with no
+// AI pipeline run. Enter to save; the field clears and stays focused so
+// several subtasks can be added back-to-back.
+function QuickAddSubtask({ onAdd }) {
+  const [value, setValue] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = async () => {
+    const title = value.trim();
+    if (!title || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onAdd(title);
+      setValue('');
+    } catch (err) {
+      setError(err.message || 'Failed to add subtask.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="pt-1">
+      <div className="flex items-center gap-2 px-1.5">
+        <Plus className="w-3.5 h-3.5 text-muted flex-shrink-0" />
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          placeholder="Quick-add a subtask… (Enter to save)"
+          disabled={submitting}
+          className="flex-1 min-w-0 bg-transparent text-sm text-secondary placeholder:text-muted py-1.5 outline-none border-b border-transparent focus:border-brand-500/50 transition-colors disabled:opacity-60"
+        />
+      </div>
+      {error && <p className="text-[11px] text-danger pl-7 pt-0.5">{error}</p>}
+    </div>
+  );
+}
+
+function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks, onQuickAdd }) {
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
   const draggableList = module.tasks.length > 1;
@@ -102,6 +143,7 @@ function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks }) {
               onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
             />
           ))}
+          <QuickAddSubtask onAdd={(title) => onQuickAdd(module.id, title)} />
         </div>
       )}
     </div>
@@ -125,6 +167,22 @@ export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
   if (!milestones || milestones.length === 0) {
     return <div className="card p-8 text-center text-sm text-muted">No roadmap generated yet.</div>;
   }
+
+  // Quick-Add Subtask: no optimistic insert — the new task needs a real
+  // taskId from the server (module.tasks entries are full task objects, and
+  // every downstream link/drag/complete action depends on that id being
+  // real), so the module simply re-renders with it once the request resolves.
+  const handleQuickAdd = async (moduleId, title) => {
+    const { task } = await addModuleTask(projectId, moduleId, { title });
+    setMilestones((prev) =>
+      prev.map((m) => ({
+        ...m,
+        modules: m.modules.map((mod) =>
+          mod.id !== moduleId ? mod : { ...mod, tasks: [...mod.tasks, { ...task, progress: task.progress ?? 0 }] }
+        ),
+      }))
+    );
+  };
 
   const handleReorderTasks = async (moduleId, newTaskIds) => {
     const previous = milestones;
@@ -184,6 +242,7 @@ export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
                     isOpen={openModule === module.id}
                     onToggle={() => setOpenModule(openModule === module.id ? null : module.id)}
                     onReorderTasks={handleReorderTasks}
+                    onQuickAdd={handleQuickAdd}
                   />
                 ))}
               </div>
