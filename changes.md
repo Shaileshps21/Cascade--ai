@@ -13,6 +13,24 @@ rather than left implied.
 
 ---
 
+## 2026-08-30 — Groq→Gemini fallback crashed with "fallbackFn is not a function" (reported live in production) ✅
+
+**Trigger.** User saw `time_estimation_agent failed: fallbackFn is not a function` on the live deployed app (`https://cascade2107.web.app/`), surfaced as a red "System" error in the pipeline SSE stream during the Estimation stage.
+
+**Root cause.** `config/Llm.js`'s `createClients('groq', ...)` builds a Groq→Gemini fallback by calling `wrapGeminiText(...)`, which returns a wrapper **object** (`{ generateText: async (prompt, opts) => ... }`), and passes that object as `wrapGroqText`'s `fallbackFn` parameter. But `wrapGroqText`'s own catch block invoked it as `fallbackFn(prompt, opts)` — calling an object directly as if it were a function. This is unreachable in the success path (it only matters once the primary Groq call actually fails and a Gemini key is configured), which is exactly why it went unnoticed until a real Groq failure happened in production: instead of gracefully falling over to Gemini, every agent's LLM call hard-crashed the moment Groq had any transient, non-auth failure (rate limit, 404 model change, timeout, empty response) — turning what should be an invisible fallback into a total pipeline failure.
+
+**Fix.** Changed the call to `fallbackFn.generateText(prompt, { promptVersion, maxOutputTokens, jsonMode })`, matching how every other caller in the codebase already treats these wrapper objects (`clients.pro.generateText(...)`).
+
+**Regression test added.** `wrapGroqText`/`wrapGeminiText` were previously unexported, untestable internals — `config/Llm.js` had zero test coverage before this. Exported both (additive, no behavior change) and added `config/Llm.fallback.test.js` with a fake Groq client that throws a non-retryable 404 and a fake Gemini model that succeeds, asserting the fallback actually returns the Gemini response instead of throwing. Confirmed the test is valid by reverting the one-line fix and re-running it first — it reproduced the exact reported error string (`fallbackFn is not a function`) before the fix, then passed after restoring it.
+
+**Files changed:**
+- `server/config/Llm.js` — one-line fix (`fallbackFn(...)` → `fallbackFn.generateText(...)`); `wrapGroqText`/`wrapGeminiText` exported for testability.
+- `server/config/Llm.fallback.test.js` (new) — 2 tests.
+
+**Verified:** full server suite 395/395 passing (2 new). Bug reproduced and fix confirmed via the new test's revert/re-apply cycle described above, not just read by inspection.
+
+---
+
 ## 2026-08-30 — Project soft-delete (archive) silently did nothing — dotted Firestore keys don't nest under `.set()` ✅
 
 **Trigger.** The user reported the previously-built Project Soft-Delete (Archive) feature wasn't working as intended: deleting a project was supposed to make it disappear from the dashboard forever while keeping the Firestore document for the memory agent, but deleted projects kept reappearing.

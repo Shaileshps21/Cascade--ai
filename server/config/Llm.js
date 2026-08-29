@@ -323,7 +323,10 @@ async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1000, label = 'LLM
 }
 
 // ── Groq text wrapper ─────────────────────────────────────────────────────────
-function wrapGroqText(groqClient, modelName, temperature = 0.3, defaultMaxTokens = 8192, fallbackFn = null) {
+// Exported (alongside wrapGeminiText below) so the Groq→Gemini fallback wiring
+// itself — the exact bug class this comment sits next to — can be exercised
+// directly in tests without needing real API keys or live network calls.
+export function wrapGroqText(groqClient, modelName, temperature = 0.3, defaultMaxTokens = 8192, fallbackFn = null) {
     const ceiling = modelCeiling(modelName);
 
     return {
@@ -370,7 +373,10 @@ function wrapGroqText(groqClient, modelName, temperature = 0.3, defaultMaxTokens
             } catch (err) {
                 if (fallbackFn && !isAuthError(err)) {
                     console.warn(`[Groq] Falling back to Gemini: ${err.message?.slice(0, 80)}`);
-                    return fallbackFn(prompt, { promptVersion, maxOutputTokens, jsonMode });
+                    // fallbackFn is a wrapGeminiText() wrapper object ({ generateText }),
+                    // not a bare function — calling it directly throws "fallbackFn is
+                    // not a function" the moment a real fallback is ever needed.
+                    return fallbackFn.generateText(prompt, { promptVersion, maxOutputTokens, jsonMode });
                 }
                 throw err;
             }
@@ -379,7 +385,7 @@ function wrapGroqText(groqClient, modelName, temperature = 0.3, defaultMaxTokens
 }
 
 // ── Gemini text wrapper ───────────────────────────────────────────────────────
-function wrapGeminiText(model, modelName, baseGenerationConfig = {}) {
+export function wrapGeminiText(model, modelName, baseGenerationConfig = {}) {
     const ceiling = modelCeiling(modelName);
 
     return {
