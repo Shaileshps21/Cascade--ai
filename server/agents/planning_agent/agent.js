@@ -38,9 +38,12 @@ const PROMPT_VERSION = 'v1.0.0';
 // (potentially 8 milestones x 6 modules x 8 tasks = up to 384 tasks) risks
 // output truncation and makes JSON-repair unreliable on a huge payload. One
 // LLM call per task is wasteful (per-call latency/overhead dominates for a
-// tiny per-task prompt, and it multiplies rate-limit exposure). Batches of 8
-// tasks per call balance prompt/response size against total round-trips.
-const WORKSPACE_BATCH_SIZE = 8;
+// tiny per-task prompt, and it multiplies rate-limit exposure — each call
+// counts against the provider's requests-per-minute/day quota regardless of
+// its size). Raised from 8 to 14: a 14-task workspace batch still comfortably
+// fits well under any tier's output ceiling, and nearly halves the number of
+// Stage 3 round-trips (and therefore request-quota exposure) for a large plan.
+const WORKSPACE_BATCH_SIZE = 14;
 
 const DIFFICULTIES = ['low', 'medium', 'high', 'very_high'];
 const PRIORITIES = ['low', 'medium', 'high', 'critical'];
@@ -98,7 +101,8 @@ export async function runPlanningAgent(context, clients, eventBus = null, sseEmi
             let domainAnalysis;
             try {
                 const prompt1 = buildDomainAnalysisPrompt(rawGoal, category, complexity, deadlineISO, nowISO);
-                const result1 = await llm.pro.generateText(prompt1, { promptVersion: PROMPT_VERSION });
+                // Small flat JSON (6 short fields) — 700 tokens is generous headroom.
+                const result1 = await llm.pro.generateText(prompt1, { promptVersion: PROMPT_VERSION, maxOutputTokens: 700 });
                 domainAnalysis = await parseJSONWithRepair(extractText(result1), llm.flash);
             } catch (err) {
                 console.warn(`[${AGENT_NAME}] Stage 1 domain analysis failed, using fallback: ${err.message}`);

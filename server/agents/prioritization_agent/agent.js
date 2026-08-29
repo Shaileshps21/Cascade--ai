@@ -62,7 +62,10 @@ export async function runPrioritizationAgent(context, clients, eventBus = null, 
             const prompt = buildPrioritizationPrompt(intent, memory, nowISO, hoursUntilDeadline, ctx.rawGoal);
 
             // Uses clients.pro — prioritization is a higher-stakes scoring task.
-            const result = await llm.pro.generateText(prompt, { promptVersion: PROMPT_VERSION });
+            // Output is one flat JSON object (no nested hierarchy) — 1200 tokens
+            // is comfortable headroom without reserving the full 10240-token pro
+            // default on every single task (this agent runs once per task).
+            const result = await llm.pro.generateText(prompt, { promptVersion: PROMPT_VERSION, maxOutputTokens: 1200 });
             const text = extractText(result);
             const parsed = await parseJSONWithRepair(text, llm.flash);
 

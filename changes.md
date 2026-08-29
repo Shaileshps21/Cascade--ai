@@ -13,6 +13,76 @@ rather than left implied.
 
 ---
 
+## 2026-08-29 — Session summary: pipeline reliability audit, agent NLU upgrade, scheduler correctness fix
+
+**Trigger.** The Groq default model had just been swapped to `openai/gpt-oss-120b` (previous entry below), and the user reported the pipeline couldn't complete even a single, moderately complex natural-language planning request — a one-day schedule with fixed calendar blocks (a client call, lunch), a stated "90 minutes of focus then a 15-minute break" rule, and an inter-task dependency ("Finalize Q3 Report requires Sarah's feedback first"). The ask was to make `planning_agent`, `prioritization_agent`, `review_agent`, and `scheduler_agent` faster, lighter on API resources, and actually capable of honoring constraints like these instead of silently ignoring them.
+
+**What was actually found.** Three explore passes over the full pipeline (`planning_agent`, `prioritization_agent`, `review_agent`, `scheduler_agent`, `intent_context_agent`, `orchestrator.js`, `shared/agentRunner.js`) turned up two distinct problems, not one:
+1. **A real capability gap.** Nothing anywhere in the pipeline had a concept of a user-declared fixed time block, a continuous-focus/break rule, or a capacity-aware "which task to drop" explanation at the single-day level — `intent.userConstraints` captured such statements as unstructured free text that no downstream agent ever read.
+2. **A live reliability problem, confirmed empirically, not just from a code comment.** A real test run of the user's exact query hit Groq's `openai/gpt-oss-120b` free-tier ~8K TPM ceiling on `knowledge_acquisition_agent` (413 "Request too large") — this app runs several early-pipeline agents concurrently, and their combined token usage can exceed that ceiling within the same minute even though no single prompt is oversized. This is a consequence of the model choice made in the previous session, not something prompt-trimming alone can fully offset.
+
+**What shipped.** See the two entries directly below for full technical detail:
+- Natural-language scheduling constraints (fixed time blocks, focus/break rule) implemented end-to-end, reusing the scheduler's existing, already-tested busy-slot carve-out logic rather than inventing a parallel mechanism.
+- Prompt-size and call-count trims across the four target agents, focused on the levers that actually reduce request/token-quota exposure (fewer round-trips, smaller inputs) rather than `maxOutputTokens` tuning, which doesn't help once the realization landed that Groq/Gemini rate limits are based on actual tokens consumed, not the requested ceiling.
+- A genuine pre-existing scheduler bug found while verifying the above: `fixDependencyViolations` repaired dependency-order violations with blind pointer arithmetic, with no working-hours awareness — a repaired task could spill past the day's cutoff. Fixed and re-verified against the user's exact scenario via a standalone script (LLM calls bypassed entirely, since the model-quota problem above made a live pipeline run unusable for verification).
+- `validateApiKey`'s `"null" isn't available on this account/key` bug (separately reported by the user while this work was in progress) — fixed as its own entry below.
+
+**Verified:** all 381 pre-existing server tests still pass after every change. The new fixed-event/break-rule logic and the `fixDependencyViolations` fix were verified with a standalone script simulating the user's exact query (tasks, dependency, fixed blocks, focus rule) against the real `buildScheduleSkeleton`/`mergeFixedEventsIntoBusySlots` functions — see the "Scheduler correctness fix" entry for the specific assertions. A full live pipeline run was attempted and confirmed the `openai/gpt-oss-120b` TPM finding above; it was not able to complete end-to-end due to that pre-existing model-choice constraint, which is called out to the user as a separate, already-understood limitation rather than left ambiguous.
+
+---
+
+## 2026-08-29 — Scheduler correctness fix: dependency-violation repair could spill a task past the working-hours cutoff ✅
+
+**What.** `fixDependencyViolations()` (in `scheduler_agent/agent.js`) is the deterministic "safety net" that runs after every schedule placement pass to repair a task that got scheduled before one of its own dependencies finished. It worked by blind pointer arithmetic — `newStart = dependency's end + gap`, then re-adding the task's original duration — with no awareness of the working-hours window, weekend mode, or busy slots. A task pushed late enough by a same-day dependency chain could end up starting at, say, 17:15 with a 2-hour duration and finish at 19:15, silently blowing past an 18:00 hard stop.
+
+**How found.** While verifying the new fixed-event/focus-break logic (next entry) against the user's exact one-day scheduling scenario via a standalone script, `T3` ("Finalize Q3 Report", which depends on `T2`) came back scheduled 17:15–19:15 against a stated 09:00–18:00 working window — reproducible and traced directly to this function.
+
+**How fixed.** `fixDependencyViolations()` now re-anchors a violating task via `findNextFreeSlot()` (the same slot-search helper every other placement path already uses) instead of raw arithmetic, so a repair that would spill past the day's end correctly rolls the task to the next valid working day. Both call sites (`buildScheduleSkeleton`'s post-reorder safety net, and `runSchedulerAgent`'s post-processing of the LLM's own proposed schedule) now pass through the resolved `workStartHour`/`workEndHour`/`weekendMode`/busy slots instead of calling it with no scheduling context at all.
+
+**Files changed:**
+- `server/agents/scheduler_agent/agent.js` — `fixDependencyViolations()` signature and repair logic; both call sites updated to pass working-hours context.
+
+**Verified:** `npm test` (server, 381/381 passing, unchanged). Standalone script (`buildScheduleSkeleton` called directly, no LLM) simulating the user's exact 5-task/dependency/fixed-event scenario: before the fix, the dependent task ended at 19:15; after, it rolls to the next day and every entry stays within 09:00–18:00.
+
+---
+
+## 2026-08-29 — Pipeline reliability + NLU pass on planning/prioritization/review/scheduler agents ✅
+
+**What.** Two kinds of changes, addressing the two problems described in the session-summary entry above.
+
+**Natural-language scheduling constraints (new capability).** `intent_context_agent` now extracts three new optional fields from the user's raw goal text: `fixedEvents` (non-negotiable clock-time commitments — "11:30-12:30 client call" — as `{title, startTime, endTime}`), `maxContinuousFocusMinutes`, and `breakMinutes`. All three default to empty/null and are explicitly instructed to never be invented — a request that doesn't mention them behaves exactly as before. `scheduler_agent` merges `fixedEvents` into the same `busySlots` array already used for Google Calendar conflicts (`mergeFixedEventsIntoBusySlots()`, new pure/exported function) rather than building a second carve-out mechanism, and `placeTasksInOrder()` now tracks continuous work minutes since the last break and inserts a real `isBuffer: true` "Break" entry once `maxContinuousFocusMinutes` would be exceeded — inert when that field is absent. The scheduler's LLM prompt was also updated to explain *why* those gaps exist, for better energy-aware ordering around them.
+
+**Resource-usage trims (the levers that actually matter).** Initial instinct was to lower `maxOutputTokens` broadly, but Groq/Gemini rate limits are based on tokens actually consumed, not the requested ceiling — lowering it only helps for calls with reliably small output (added there: `prioritization_agent`, `review_agent`, `planning_agent` Stage 1) and would backfire elsewhere by increasing truncation-driven continuation retries. The real reductions: removed a ~23-line duplicate JSON example block from `prioritization_agent`'s prompt (fires on every task), capped previously-unbounded context arrays (`bestWorkflowModules`, `commonFailures`, review-feedback issues) that could otherwise grow prompt size unpredictably, and raised `planning_agent`'s Stage 3 task-workspace batch size from 8 to 14 tasks/call — nearly halving LLM round-trips (and therefore request-quota exposure, which matters as much as token quota) for larger plans.
+
+**Files changed:**
+- `server/agents/intent_context_agent/prompt_v1.js` — `fixedEvents`/`maxContinuousFocusMinutes`/`breakMinutes` extraction.
+- `server/agents/scheduler_agent/agent.js` — `mergeFixedEventsIntoBusySlots()` (new); break-insertion in `placeTasksInOrder()`; wiring in `runSchedulerAgent()`.
+- `server/agents/scheduler_agent/prompt_v1.js` — surfaces fixed events / focus-break rule in the LLM prompt text.
+- `server/agents/planning_agent/agent.js` — `WORKSPACE_BATCH_SIZE` 8→14; `maxOutputTokens: 700` on Stage 1.
+- `server/agents/planning_agent/prompt_v1.js` — capped `bestWorkflowModules`/review-feedback-issues arrays.
+- `server/agents/prioritization_agent/agent.js` — `maxOutputTokens: 1200`.
+- `server/agents/prioritization_agent/prompt_v1.js` — removed duplicate example block; capped `commonFailures`/`bestWorkflowModules`.
+- `server/agents/review_agent/agent.js` — `maxOutputTokens: 2000`.
+
+**Verified:** `npm test` (server) 381/381 passing throughout. NLU additions verified via the standalone script described in the "Scheduler correctness fix" entry above (fixed events correctly avoided, break correctly inserted after 90 minutes, dependency correctly respected). A live end-to-end pipeline run was attempted with the user's real query and a personal Groq key, and confirmed the `openai/gpt-oss-120b` TPM finding described in the session summary — that is a separate, already-understood model-choice limitation, not a defect in this work.
+
+---
+
+## 2026-08-29 — Fix: `validateApiKey` produced a literal `"null" isn't available on this account/key` error ✅
+
+**What.** Reported by the user while the above work was in progress: saving/verifying an API key with no specific model chosen ("Recommended default") produced the error message `"null" isn't available on this account/key. Pick a different model.` — even for models that were genuinely available.
+
+**Root cause.** `validateApiKey()` always attributed a failure to the caller-supplied `model` parameter, regardless of which call actually failed. The flash-tier verification call (which always runs first) never uses that parameter — it's hardcoded per provider — so when the user picked "Recommended default," `model` was `null`, and a flash-tier failure produced a template-literal `"${null}"` → the literal text `"null"`. The message also misattributed *any* failure to the user's pro-tier choice even when the actually-failing call was the unrelated flash-tier one.
+
+**Fix.** `validateApiKey()` now tracks which model each call actually used — the fixed flash-tier model for a flash failure, `clients.modelId` (the *resolved* pro model, accounting for `createClients()`'s own silent-fallback-if-unrecognized guard) for a pro-tier failure — and reports that. `createClients()` itself was also wrapped in its own try/catch so a synchronous SDK-construction error doesn't propagate unhandled (it previously sat inside the same try/catch as everything else; extracting the per-call error handling meant it needed its own guard).
+
+**Files changed:**
+- `server/config/Llm.js` — `validateApiKey()` restructured into per-call try/catches with correct model attribution; new `buildValidationError()` helper.
+
+**Verified:** `node --check` (syntax), `npm test` (server) 381/381 passing. Not exercised against a live invalid-model response (would require a real API key situation reproducing the original report) — the fix was verified by tracing the corrected attribution logic against the exact failure path described in the bug report.
+
+---
+
 ## 2026-08-29 — Groq default model swap: `llama-3.3-70b-versatile` dismantled → `openai/gpt-oss-120b` ✅
 
 **What.** Groq deprecated/dismantled `llama-3.3-70b-versatile` (the app's `pro`-tier default since the original LLM client was built) — it now 404s as `model_not_found` on every call. `GROQ_MODELS.pro` is now `openai/gpt-oss-120b`, and `qwen/qwen3.6-27b` was added to the user-selectable model list in its place. The user also directly added the newer Gemini 3.x line (`gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite`) to `MODEL_DISPLAY_NAMES`/`GEMINI_SELECTABLE_MODELS`.

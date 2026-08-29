@@ -28,6 +28,9 @@
  * @param {string} [opts.weekendMode]         - 'skip' | 'light' | 'normal' | 'heavy'
  * @param {number} opts.workStartHour
  * @param {number} opts.workEndHour
+ * @param {Array<{title:string, startTime:string, endTime:string}>} [opts.fixedEvents] - user-stated non-negotiable time blocks (already carved out of the skeleton as busy time — shown here so the LLM understands why those gaps exist)
+ * @param {number|null} [opts.maxContinuousFocusMinutes] - user-stated continuous-work limit before a break, if any
+ * @param {number|null} [opts.breakMinutes] - break duration paired with maxContinuousFocusMinutes
  * @returns {string} prompt
  */
 export function buildSchedulerPrompt({
@@ -43,6 +46,9 @@ export function buildSchedulerPrompt({
     weekendMode = 'skip',
     workStartHour,
     workEndHour,
+    fixedEvents = [],
+    maxContinuousFocusMinutes = null,
+    breakMinutes = null,
 }) {
     const optimalWorkHours = memory?.optimalWorkHours ?? [9, 10, 14, 15];
     const reliabilityScore = memory?.reliabilityScore ?? null;
@@ -71,6 +77,8 @@ export function buildSchedulerPrompt({
 ${reliabilityScore !== null ? `- User reliability score (historical on-time completion): ${reliabilityScore}` : ''}
 ${commonFailures.length ? `- Common historical failure patterns to avoid: ${commonFailures.join('; ')}` : ''}
 ${averageSpeeds ? `- Historical average speeds by task type: ${JSON.stringify(averageSpeeds)}` : ''}
+${fixedEvents.length ? `- FIXED, NON-NEGOTIABLE commitments (already carved out of the skeleton below — do NOT schedule anything over these): ${fixedEvents.map(e => `"${e.title}" ${e.startTime}–${e.endTime}`).join('; ')}` : ''}
+${maxContinuousFocusMinutes ? `- Continuous-focus limit: no more than ${maxContinuousFocusMinutes} minutes of back-to-back work before a ${breakMinutes ?? 15}-minute break (the skeleton below already inserts these breaks — preserve them, do not remove or merge them away).` : ''}
 
 ## Candidate skeleton (deterministically pre-computed — topological order + naive slot placement avoiding calendar conflicts)
 This is your STARTING POINT. Refine timing, energy levels, and ordering — do not feel obligated to copy it exactly, but do NOT violate dependency ordering.

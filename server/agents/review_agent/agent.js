@@ -296,7 +296,10 @@ export async function runReviewAgent(context, clients, eventBus = null, sseEmit 
         maxRetries: 2,
         agentFn: async (ctx, llm) => {
             const prompt = buildReviewPrompt(ctx, target, deterministicIssues);
-            const result = await llm.pro.generateText(prompt, { promptVersion: PROMPT_VERSION });
+            // qualityScore + a bounded issues/suggestedFixes list — 2000 tokens
+            // is ample without reserving the 10240-token pro default, and this
+            // agent can be invoked up to 4x per task (initial + revisions).
+            const result = await llm.pro.generateText(prompt, { promptVersion: PROMPT_VERSION, maxOutputTokens: 2000 });
             const text = extractText(result);
             const llmParsed = await parseJSONWithRepair(text, llm.flash);
 

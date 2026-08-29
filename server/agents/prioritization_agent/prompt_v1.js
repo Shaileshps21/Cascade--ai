@@ -65,8 +65,8 @@ export function buildPrioritizationPrompt(intent, memory, nowISO, hoursUntilDead
         ? `USER MEMORY PROFILE (from Memory Agent — derived from task_history/user_benchmarks):
 - reliabilityScore: ${safeMemory.reliabilityScore ?? 'unknown'} (0-1, higher = more historically reliable)
 - averageSuccessRate: ${safeMemory.averageSuccessRate ?? 'unknown'} (0-1)
-- commonFailures: ${JSON.stringify(safeMemory.commonFailures ?? [])}
-- bestWorkflowModules: ${JSON.stringify(safeMemory.bestWorkflowModules ?? [])}
+- commonFailures: ${JSON.stringify((safeMemory.commonFailures ?? []).slice(0, 5))}
+- bestWorkflowModules: ${JSON.stringify((safeMemory.bestWorkflowModules ?? []).slice(0, 5))}
 - similarProjects: ${JSON.stringify((safeMemory.similarProjects ?? []).slice(0, 5))}
 - optimalWorkHours: ${JSON.stringify(safeMemory.optimalWorkHours ?? [])}`
         : `USER MEMORY PROFILE: None available — base scores on task attributes only and flag this in warningFlags.`;
@@ -95,31 +95,7 @@ ${deadlineSection}
 
 ${memorySection}
 
-Return ONLY valid JSON. No markdown, no explanation.
-
-Example output structure:
-{
-  "priorityScore": 78,
-  "urgencyScore": 65,
-  "importanceScore": 82,
-  "riskScore": 40,
-  "businessValue": 70,
-  "projectImportance": 75,
-  "deadlineConfidence": 0.72,
-  "estimatedUncertainty": 35,
-  "expectedInterruptionScore": 30,
-  "personalizationInsights": ["User historically completes similar 'work' tasks on time"],
-  "recommendedStartTime": "2026-07-18T09:00:00.000Z",
-  "bufferHoursNeeded": 2,
-  "warningFlags": [],
-  "reasoning": {
-    "confidence": 0.82,
-    "summary": "Deadline is comfortable and the user has a strong track record on similar tasks, so risk is moderate.",
-    "assumptions": ["Memory profile reflects current work capacity"],
-    "warnings": [],
-    "promptVersion": "v1.0.0"
-  }
-}`;
+Return ONLY valid JSON matching the schema above exactly. No markdown, no explanation.`;
 }
 
 export { PRIORITY_PROMPT };

@@ -50,7 +50,22 @@ Extract the following and return as JSON:
 8. assumptions: Array of assumptions you made to fill in missing information
 9. preferences: Array of preferences implied by the goal (e.g. "prefers hands-on practice")
 10. scope: One sentence describing what is IN scope and what is NOT in scope
-11. reasoning: Object with:
+11. fixedEvents: Array of NON-NEGOTIABLE, clock-time-specific commitments the user
+    explicitly mentioned (meetings, calls, appointments, lunch, classes) — things
+    that must NOT be scheduled over, as opposed to flexible tasks. Only extract an
+    event here if the user gave (or clearly implied) a specific start and end
+    clock time. Resolve relative day references ("today", "tomorrow") against
+    Current time above. Each entry: { "title": string, "startTime": ISO 8601,
+    "endTime": ISO 8601 }. If the user mentioned NO such fixed-time commitments,
+    return an empty array — do not invent any.
+12. maxContinuousFocusMinutes: number|null — if the user explicitly stated a rule
+    like "no more than 90 minutes of continuous work" or "take a break every
+    hour", extract the number of minutes here. Otherwise null — do NOT invent a
+    default; the scheduler only applies this rule when it is non-null.
+13. breakMinutes: number|null — the break duration the user stated should follow
+    maxContinuousFocusMinutes of work (e.g. "then a 15-minute break" → 15).
+    Only set this alongside a non-null maxContinuousFocusMinutes; otherwise null.
+14. reasoning: Object with:
     - confidence: number 0-1 (how confident you are in this extraction)
     - assumptions: array of strings
     - warnings: array of strings (e.g. ambiguous goal, past deadline)
@@ -71,11 +86,19 @@ Example output structure:
   "assumptions": ["User has basic programming knowledge"],
   "preferences": ["prefers backend work"],
   "scope": "Includes API design and implementation; excludes frontend and deployment.",
+  "fixedEvents": [
+    { "title": "Client Status Call", "startTime": "2025-08-01T11:30:00.000Z", "endTime": "2025-08-01T12:30:00.000Z" }
+  ],
+  "maxContinuousFocusMinutes": 90,
+  "breakMinutes": 15,
   "reasoning": {
     "confidence": 0.88,
     "assumptions": ["deadline inferred from complexity"],
     "warnings": [],
     "promptVersion": "v1.0.0"
   }
-}`;
+}
+
+If the goal has no fixed-time commitments or focus/break rule, still include the
+fields with their empty/null defaults ("fixedEvents": [], "maxContinuousFocusMinutes": null, "breakMinutes": null) — never omit them.`;
 }

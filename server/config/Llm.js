@@ -60,8 +60,9 @@ dotenv.config();
 //   Groq tier with higher TPM or swapping `pro` back to a higher-TPM model.
 const GROQ_MODELS = {
     pro: 'openai/gpt-oss-120b',   // best quality — planning, prioritization
-    flash: 'llama-3.1-8b-instant', // fastest — parsing, quick tasks
-};
+    flash: 'openai/gpt-oss-20b', // fastest — parsing, quick tasks
+}
+
 
 const GEMINI_MODELS = {
     pro: 'gemini-2.5-pro',
@@ -77,12 +78,8 @@ const GEMINI_MODELS = {
 const MODEL_LIMITS = {
     'openai/gpt-oss-120b': { maxOutputTokens: 65536, contextWindow: 131072 },
     'openai/gpt-oss-20b': { maxOutputTokens: 65536, contextWindow: 131072 },
-    // qwen/qwen3.6-27b: limits not yet confirmed against Groq's docs/account —
-    // deliberately omitted so modelCeiling() falls back to the conservative
-    // 8192-token default below rather than risking a fabricated ceiling.
-    // Verify via `curl https://api.groq.com/openai/v1/models` and add real
-    // maxOutputTokens/contextWindow here once confirmed.
-    'llama-3.1-8b-instant': { maxOutputTokens: 131072, contextWindow: 131072 },
+    'qwen/qwen3.6-27b': { maxOutputTokens: 131072, contextWindow: 131072 },
+    'qwen/qwen3.8-27b': { maxOutputTokens: 131072, contextWindow: 131072 },
     'gemini-2.5-pro': { maxOutputTokens: 65536, contextWindow: 1048576 },
     'gemini-2.5-flash': { maxOutputTokens: 65536, contextWindow: 1048576 },
     'gemini-2.5-flash-lite': { maxOutputTokens: 65536, contextWindow: 1048576 },
@@ -99,7 +96,7 @@ function modelCeiling(modelName) {
 // changing GROQ_MODELS/GEMINI_MODELS above is enough to update the whole app.
 const MODEL_DISPLAY_NAMES = {
     'qwen/qwen3.6-27b': 'Qwen3.6 27B',
-    'llama-3.1-8b-instant': 'Llama 3.1 8B',
+    'qwen/qwen3.8-27b': 'Qwen3.8 27B',
     'openai/gpt-oss-20b': 'GPT-OSS 20B',
     'openai/gpt-oss-120b': 'GPT-OSS 120B',
     'gemini-2.5-pro': 'Gemini 2.5 Pro',
@@ -160,7 +157,7 @@ export function getProviderSummary(keyType, modelOverride = null) {
 // workload — e.g. embedding-001, whisper, prompt-guard are excluded).
 const GROQ_SELECTABLE_MODELS = [
     'qwen/qwen3.6-27b',
-    'llama-3.1-8b-instant',
+    'qwen/qwen3.8-27b',
     'openai/gpt-oss-120b',
     'openai/gpt-oss-20b',
 ];
@@ -197,7 +194,6 @@ const COST_PER_1K = {
     // qwen/qwen3.6-27b: pricing not yet confirmed — omitted deliberately so
     // estimateCost() logs a warning and reports $0 rather than a fabricated
     // figure. Add real per-1K rates here once confirmed against Groq's pricing page.
-    'llama-3.1-8b-instant': { input: 0.000050, output: 0.000080 },
     'gemini-2.5-pro': { input: 0.00125, output: 0.00500 },
     'gemini-2.5-flash': { input: 0.000075, output: 0.00030 },
     'gemini-2.5-flash-lite': { input: 0.0000375, output: 0.00015 },
@@ -542,31 +538,56 @@ export const defaultClients = buildDefaultClients();
  *   immediately at save time instead of failing later mid-pipeline).
  */
 export async function validateApiKey(keyType, apiKey, model = null) {
+    let clients;
     try {
-        const clients = createClients(keyType, apiKey, {}, model);
+        clients = createClients(keyType, apiKey, {}, model);
+    } catch (err) {
+        return { valid: false, error: `Connection failed: ${(err.message || '').slice(0, 100)}` };
+    }
+    // The flash-tier call always uses the fixed flash model for this provider
+    // (never the user's `model` override — that only applies to the pro
+    // tier), so error messages must attribute a flash failure to THAT model,
+    // not to `model` — which is null whenever the user picked "Recommended
+    // default", and previously produced a literal `"null" isn't available...`
+    // message that misattributed the failure and hid the real cause.
+    const flashModelId = keyType === 'groq' ? GROQ_MODELS.flash : GEMINI_MODELS.flash;
+
+    try {
         // Flash call proves the key itself authenticates, regardless of model choice.
         const flashResult = await clients.flash.generateText('Reply with the single word: valid');
         const flashText = typeof flashResult === 'string' ? flashResult : flashResult.text;
         if (!flashText) throw new Error('Empty response');
+    } catch (err) {
+        return buildValidationError(err, flashModelId);
+    }
 
-        if (model) {
+    if (model) {
+        try {
             const proResult = await clients.pro.generateText('Reply with the single word: valid');
             const proText = typeof proResult === 'string' ? proResult : proResult.text;
             if (!proText) throw new Error(`Empty response from ${model}`);
+        } catch (err) {
+            // clients.modelId is the ACTUALLY resolved pro model — createClients()
+            // silently falls back to the provider default if `model` wasn't a
+            // recognized selectable id, so this can legitimately differ from
+            // the raw `model` argument, and is the more accurate thing to report.
+            return buildValidationError(err, clients.modelId ?? model);
         }
-
-        return { valid: true };
-    } catch (err) {
-        const msg = err.message || '';
-        if (isInvalidModelError(err)) {
-            return { valid: false, error: `"${getModelLabelById(model) || model}" isn't available on this account/key. Pick a different model.` };
-        }
-        if (isQuotaError(err)) return { valid: true }; // quota = key is real, just busy
-        if (isAuthError(err)) {
-            return { valid: false, error: 'Invalid API key — please check and try again.' };
-        }
-        return { valid: false, error: `Connection failed: ${msg.slice(0, 100)}` };
     }
+
+    return { valid: true };
+}
+
+function buildValidationError(err, failedModelId) {
+    const msg = err.message || '';
+    if (isInvalidModelError(err)) {
+        return { valid: false, error: `"${getModelLabelById(failedModelId) || failedModelId}" isn't available on this account/key. Pick a different model.` };
+    }
+    if (isQuotaError(err)) return { valid: true }; // quota = key is real, just busy
+    if (isAuthError(err)) {
+        return { valid: false, error: 'Invalid API key — please check and try again.' };
+    }
+    return { valid: false, error: `Connection failed: ${msg.slice(0, 100)}` };
 }
 
 // ── JSON parse helper ─────────────────────────────────────────────────────────

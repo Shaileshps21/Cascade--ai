@@ -389,12 +389,19 @@ export function buildFailureConditions(feasibilityCheck, context) {
  * @param {number} workStartHour
  * @param {number} workEndHour
  * @param {string} weekendMode
+ * @param {number|null} [maxContinuousFocusMinutes] - if set, a break is inserted
+ *   once this much continuous work has accumulated since the last break/day-start.
+ *   Absent/null preserves prior behavior exactly (no breaks inserted).
+ * @param {number} [breakMinutes] - break duration when maxContinuousFocusMinutes triggers.
  * @returns {Array<object>} skeleton entries (see shape below)
  */
-function placeTasksInOrder(orderedTaskIds, taskById, estimationMap, createdAt, busySlots, dailyBudgetMinutes, workStartHour, workEndHour, weekendMode) {
+function placeTasksInOrder(orderedTaskIds, taskById, estimationMap, createdAt, busySlots, dailyBudgetMinutes, workStartHour, workEndHour, weekendMode, maxContinuousFocusMinutes = null, breakMinutes = 15) {
     let cursor = new Date(createdAt.getTime() + FIRST_TASK_DELAY_MINUTES * 60_000);
     let dayKey = cursor.toDateString();
     let minutesScheduledToday = 0;
+    // Only tracked/used when maxContinuousFocusMinutes is set — otherwise this
+    // whole mechanism is inert and placement behaves exactly as before.
+    let continuousMinutesSinceBreak = 0;
 
     const skeleton = [];
     for (const taskId of orderedTaskIds) {
@@ -425,6 +432,32 @@ function placeTasksInOrder(orderedTaskIds, taskById, estimationMap, createdAt, b
             next.setDate(next.getDate() + 1);
             next.setHours(workStartHour, 0, 0, 0);
             cursor = clampToWorkingHours(next, workStartHour, workEndHour, weekendMode);
+            continuousMinutesSinceBreak = 0; // a new day is itself a break
+        }
+
+        // Max-continuous-focus rule (only active when the user stated one):
+        // placing this task would exceed the continuous-work ceiling, so
+        // insert an explicit break slot first and reset the counter.
+        if (maxContinuousFocusMinutes && continuousMinutesSinceBreak > 0
+            && continuousMinutesSinceBreak + adjustedDuration > maxContinuousFocusMinutes) {
+            const breakSlot = findNextFreeSlot(cursor, breakMinutes, busySlots, workStartHour, workEndHour, weekendMode);
+            skeleton.push({
+                taskId: `break-${skeleton.length}`,
+                taskName: 'Break',
+                startTime: breakSlot.start.toISOString(),
+                endTime: breakSlot.end.toISOString(),
+                estimatedDuration: breakMinutes,
+                adjustedDuration: breakMinutes,
+                adjustmentReason: `Inserted after ${continuousMinutesSinceBreak}m of continuous work (limit: ${maxContinuousFocusMinutes}m).`,
+                priority: 'low',
+                difficulty: 'low',
+                dependencies: [],
+                isBuffer: true,
+                isReview: false,
+                confidence: 1,
+            });
+            cursor = new Date(breakSlot.end.getTime() + SLOT_GAP_MINUTES * 60_000);
+            continuousMinutesSinceBreak = 0;
         }
 
         const slot = findNextFreeSlot(cursor, adjustedDuration, busySlots, workStartHour, workEndHour, weekendMode);
@@ -433,8 +466,10 @@ function placeTasksInOrder(orderedTaskIds, taskById, estimationMap, createdAt, b
         if (slotDayKey !== dayKey) {
             dayKey = slotDayKey;
             minutesScheduledToday = 0;
+            continuousMinutesSinceBreak = 0;
         }
         minutesScheduledToday += adjustedDuration;
+        continuousMinutesSinceBreak += adjustedDuration;
 
         skeleton.push({
             taskId,
@@ -554,20 +589,31 @@ export function buildScheduleSkeleton(context, busySlots = [], dailyBudgetMinute
 
     const createdAt = new Date(context?.metadata?.createdAt ?? Date.now());
 
-    const firstPass = placeTasksInOrder(orderedTaskIds, taskById, estimationMap, createdAt, busySlots, dailyBudgetMinutes, workStartHour, workEndHour, weekendMode);
+    // Only present when the user explicitly stated a focus/break rule in
+    // their raw goal text (intent_context_agent); absent for every other
+    // request, which preserves prior placement behavior exactly.
+    const maxContinuousFocusMinutes = typeof context?.intent?.maxContinuousFocusMinutes === 'number'
+        && context.intent.maxContinuousFocusMinutes > 0
+        ? context.intent.maxContinuousFocusMinutes
+        : null;
+    const breakMinutes = typeof context?.intent?.breakMinutes === 'number' && context.intent.breakMinutes > 0
+        ? context.intent.breakMinutes
+        : 15;
+
+    const firstPass = placeTasksInOrder(orderedTaskIds, taskById, estimationMap, createdAt, busySlots, dailyBudgetMinutes, workStartHour, workEndHour, weekendMode, maxContinuousFocusMinutes, breakMinutes);
 
     const priorityOrderedIds = reorderTaskIdsByPriorityWithinDay(firstPass);
     const unchanged = priorityOrderedIds.length === orderedTaskIds.length
         && priorityOrderedIds.every((id, i) => id === orderedTaskIds[i]);
     if (unchanged) return firstPass;
 
-    const secondPass = placeTasksInOrder(priorityOrderedIds, taskById, estimationMap, createdAt, busySlots, dailyBudgetMinutes, workStartHour, workEndHour, weekendMode);
+    const secondPass = placeTasksInOrder(priorityOrderedIds, taskById, estimationMap, createdAt, busySlots, dailyBudgetMinutes, workStartHour, workEndHour, weekendMode, maxContinuousFocusMinutes, breakMinutes);
 
     // Safety net: reordering by priority can, in rare cases (e.g. a busy-slot
     // gap only one of two candidate tasks fits into), push a task across a
     // dependency edge the original topological order respected.
     // fixDependencyViolations() deterministically repairs any such case.
-    const { scheduledTasks: fixed } = fixDependencyViolations(secondPass);
+    const { scheduledTasks: fixed } = fixDependencyViolations(secondPass, 3, busySlots, workStartHour, workEndHour, weekendMode);
     return fixed;
 }
 
@@ -598,15 +644,24 @@ export function enforceFirstTaskDelay(scheduledTasks, createdAt) {
 
 /**
  * Cheap, local repair for dependency ordering violations: if a task starts
- * before one of its dependencies ends, push its start (and end, preserving
- * duration) to just after the dependency ends. Runs a few passes to
- * propagate chained fixes. Larger/irreconcilable violations are left in
- * place for the caller to flag via a lowered schedulingScore + warning.
+ * before one of its dependencies ends, re-anchor it to the next free slot
+ * at/after the dependency's end (preserving duration) via findNextFreeSlot —
+ * NOT blind pointer arithmetic — so the repaired placement still respects
+ * working hours, weekend mode, and busy slots instead of potentially
+ * spilling past the working day's cutoff (e.g. a dependency ending at 17:05
+ * must not push a 2-hour task to end at 19:15 when work ends at 18:00).
+ * Runs a few passes to propagate chained fixes. Larger/irreconcilable
+ * violations are left in place for the caller to flag via a lowered
+ * schedulingScore + warning.
  * @param {Array<{taskId:string, startTime:string, endTime:string, dependencies?:string[]}>} scheduledTasks
  * @param {number} [maxPasses]
+ * @param {Array<{start:string|Date, end:string|Date}>} [busySlots]
+ * @param {number} [workStartHour]
+ * @param {number} [workEndHour]
+ * @param {string} [weekendMode]
  * @returns {{ scheduledTasks: Array<object>, fixedCount: number }}
  */
-export function fixDependencyViolations(scheduledTasks, maxPasses = 3) {
+export function fixDependencyViolations(scheduledTasks, maxPasses = 3, busySlots = [], workStartHour = WORK_START_HOUR, workEndHour = WORK_END_HOUR, weekendMode = DEFAULT_WEEKEND_MODE) {
     const byId = new Map((scheduledTasks ?? []).map(t => [t.taskId, t]));
     let fixedCount = 0;
 
@@ -622,10 +677,11 @@ export function fixDependencyViolations(scheduledTasks, maxPasses = 3) {
                 if (Number.isNaN(depEnd) || Number.isNaN(taskStart)) continue;
 
                 if (depEnd > taskStart) {
-                    const duration = new Date(task.endTime).getTime() - taskStart;
-                    const newStart = new Date(depEnd + SLOT_GAP_MINUTES * 60_000);
-                    task.startTime = newStart.toISOString();
-                    task.endTime = new Date(newStart.getTime() + duration).toISOString();
+                    const durationMinutes = Math.max(1, Math.round((new Date(task.endTime).getTime() - taskStart) / 60_000));
+                    const earliestStart = new Date(depEnd + SLOT_GAP_MINUTES * 60_000);
+                    const slot = findNextFreeSlot(earliestStart, durationMinutes, busySlots, workStartHour, workEndHour, weekendMode);
+                    task.startTime = slot.start.toISOString();
+                    task.endTime = slot.end.toISOString();
                     changed = true;
                     fixedCount++;
                 }
@@ -678,6 +734,34 @@ function buildTaskMeta(context) {
     return meta;
 }
 
+/**
+ * Merge the user's explicitly-stated fixed/non-negotiable time commitments
+ * (context.intent.fixedEvents — extracted by intent_context_agent from raw
+ * goal text, e.g. "11:30-12:30 client call") into the busySlots array so the
+ * existing, already-tested slot-carving logic (findNextFreeSlot,
+ * buildScheduleSkeleton) treats them exactly like a Google Calendar busy
+ * block — no separate carve-out code path needed. Malformed/unparsable
+ * entries are silently dropped rather than corrupting the schedule.
+ * @param {object|null} intent - context.intent
+ * @param {Array<{start:string|Date, end:string|Date}>} busySlots
+ * @returns {Array<{start:string|Date, end:string|Date}>}
+ */
+export function mergeFixedEventsIntoBusySlots(intent, busySlots = []) {
+    const fixedEvents = Array.isArray(intent?.fixedEvents) ? intent.fixedEvents : [];
+    if (fixedEvents.length === 0) return busySlots;
+
+    const validEvents = fixedEvents
+        .filter(e => e?.startTime && e?.endTime)
+        .map(e => ({ start: e.startTime, end: e.endTime }))
+        .filter(e => {
+            const s = new Date(e.start).getTime();
+            const en = new Date(e.end).getTime();
+            return !Number.isNaN(s) && !Number.isNaN(en) && en > s;
+        });
+
+    return [...(busySlots ?? []), ...validEvents];
+}
+
 // ═════════════════════════════════════════════════════════════════════════
 // Main agent entry point
 // ═════════════════════════════════════════════════════════════════════════
@@ -719,6 +803,11 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
             // from context.preferences (saved via SchedulePreferences UI).
             const { workStartHour, workEndHour, weekendMode, dailyAvailableMinutes } = resolveWorkingHours(ctx);
 
+            // ── Carve out user-declared fixed/non-negotiable time blocks ───────
+            // (e.g. "11:30-12:30 client call") alongside real Google Calendar
+            // busy times, using the same slot-avoidance logic for both.
+            const effectiveBusySlots = mergeFixedEventsIntoBusySlots(ctx.intent, busySlots);
+
             // ── Deterministic feasibility guard — never let the LLM invent an
             //    unrealistic schedule when the deadline is already impossible.
             //    IMPORTANT: infeasible does not mean "don't schedule anything".
@@ -730,7 +819,7 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
             const feasibilityCheck = checkDeadlineFeasibility(ctx, dailyAvailableMinutes);
             if (!feasibilityCheck.isFeasible) {
                 const failureConditions = buildFailureConditions(feasibilityCheck, ctx);
-                const fallbackSkeleton = buildScheduleSkeleton(ctx, busySlots, dailyAvailableMinutes, workStartHour, workEndHour, weekendMode);
+                const fallbackSkeleton = buildScheduleSkeleton(ctx, effectiveBusySlots, dailyAvailableMinutes, workStartHour, workEndHour, weekendMode);
                 return {
                     schemaVersion: SCHEMA_VERSION,
                     scheduledTasks: fallbackSkeleton.map(s => ({
@@ -755,7 +844,7 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
             }
 
             // ── Build deterministic skeleton + call the LLM for refinement ────
-            const skeleton = buildScheduleSkeleton(ctx, busySlots, dailyAvailableMinutes, workStartHour, workEndHour, weekendMode);
+            const skeleton = buildScheduleSkeleton(ctx, effectiveBusySlots, dailyAvailableMinutes, workStartHour, workEndHour, weekendMode);
             const taskMeta = buildTaskMeta(ctx);
             const createdAt = new Date(ctx?.metadata?.createdAt ?? Date.now());
             const deadline = ctx?.intent?.deadline ?? ctx?.explicitDeadline ?? null;
@@ -773,6 +862,9 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
                 weekendMode,
                 workStartHour,
                 workEndHour,
+                fixedEvents: ctx.intent?.fixedEvents ?? [],
+                maxContinuousFocusMinutes: ctx.intent?.maxContinuousFocusMinutes ?? null,
+                breakMinutes: ctx.intent?.breakMinutes ?? null,
             });
 
             const result = await llm.pro.generateText(prompt, { promptVersion: PROMPT_VERSION });
@@ -819,7 +911,7 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
 
             // ── Deterministic post-processing ─────────────────────────────────
             enforceFirstTaskDelay(parsed.scheduledTasks, createdAt);
-            const { fixedCount } = fixDependencyViolations(parsed.scheduledTasks);
+            const { fixedCount } = fixDependencyViolations(parsed.scheduledTasks, 3, effectiveBusySlots, workStartHour, workEndHour, weekendMode);
             if (fixedCount > 0) {
                 parsed.warnings.push(`Auto-corrected ${fixedCount} dependency-ordering violation(s) in the LLM's proposed schedule.`);
             }

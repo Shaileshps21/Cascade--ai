@@ -136,13 +136,16 @@ Respond ONLY with valid JSON:
 function formatReviewFeedback(reviewFeedback) {
     if (!reviewFeedback) return '';
 
-    const issues = Array.isArray(reviewFeedback)
+    const allIssues = Array.isArray(reviewFeedback)
         ? reviewFeedback
         : Array.isArray(reviewFeedback.issues)
             ? reviewFeedback.issues
             : [];
 
-    if (issues.length === 0) return '';
+    if (allIssues.length === 0) return '';
+    // Capped — a large plan with many flagged issues shouldn't balloon the
+    // revision prompt; the highest-severity issues matter most to fix first.
+    const issues = allIssues.slice(0, 15);
 
     const lines = issues.map((issue) => {
         if (typeof issue === 'string') return `- ${issue}`;
@@ -174,7 +177,7 @@ ${summary}`;
 }
 
 function formatMemorySection(memory) {
-    const workflows = memory?.bestWorkflowModules ?? [];
+    const workflows = (memory?.bestWorkflowModules ?? []).slice(0, 10);
     if (!workflows.length) return 'MEMORY CONTEXT: No prior successful workflow history available for this user.';
     return `MEMORY CONTEXT: This user has previously succeeded with these workflow modules —
 reuse similar phrasing/ordering where it fits this task:
