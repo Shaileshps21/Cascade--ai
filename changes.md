@@ -3,46 +3,13 @@
 A running log of every change made to LifeSaver — **newest first**.
 
 Each entry records *what* changed, *why* (the root cause, not just the symptom),
-and *how it was verified*. If a change wasn't verified, that's stated explicitly
+and *how it was verified*. If a change wasn't verifieded, that's stated explicitly
 rather than left implied.
 
 > **Relationship to the README's Development History:** the README section is the
 > narrative story of how the architecture arrived at its current shape, written for
 > someone reading the project cold. This file is the operational log — terser,
 > append-only, and meant for scanning "what moved recently". New entries go here.
-
----
-
-## 2026-08-29 — Scheduler still spread a one-day request across a week; manual projects never reached Google Calendar ✅
-
-**Trigger.** Two follow-up reports on the same day as the entries below. First: the user re-ran essentially the same one-day scheduling scenario the entries below were built around (09:00–18:00 hours, a client call, lunch, a 90-minute focus/15-minute break rule, five tasks totaling ~5.75h) and the scheduler still came back spreading one task per day across `Aug 30`–`Sep 4`, starting at `07:00`, instead of a single 09:00–18:00 day. Second: manually-created projects (`ManualProjectBuilder` / `POST /api/tasks/manual`) never synced to Google Calendar even with sync enabled and subtask times filled in.
-
-**Why the earlier fix in the entries below didn't resolve the first report.** That work fixed a real bug (`fixDependencyViolations` spilling a repaired task past the working-hours cutoff) and added NLU extraction for `fixedEvents`/`maxContinuousFocusMinutes`/`breakMinutes` — necessary, but not sufficient. Three separate defects remained upstream of that fix, all in the "how many minutes of work get placed per day" and "what hours count as the working day" logic:
-1. **The stated 09:00–18:00 window was never read.** `intent_context_agent` had no field for an inline working-hours statement — `resolveWorkingHours()` only ever read `context.preferences` (the user's saved day/night profile setting). The observed `07:00` starts are exactly `WORK_STYLE_PRESETS.day.workStartHour` — the user's saved profile was overriding a window they explicitly stated for that one request.
-2. **The default daily placement cap is 2 hours** (`DEFAULT_DAILY_AVAILABLE_MINUTES`), sized for an AI-*inferred* multi-day project so it stays humane when nobody said how much time they actually have. Applied to a stated 9-hour working day, it capped `placeTasksInOrder()` at ~2 tasks/day regardless of the real 09:00–18:00 window, which alone explains the one-task-per-day spread.
-3. **The scheduler prompt's Rule 4 explicitly told the LLM to spread thin and never cram**, tuned for exactly the AI-inferred multi-day case — the LLM had no way to know a real, fully-specified window had been stated, so it couldn't override that instruction even when the deterministic skeleton underneath got it right.
-
-**How fixed.**
-- `intent_context_agent` now also extracts `workStartHour`/`workEndHour` (0–23, null unless the user names an hours window for *this* request) — the same "only extract if actually stated, never invent" convention already used for `fixedEvents`.
-- `scheduler_agent.resolveWorkingHours()` prefers `context.intent.workStartHour/workEndHour` over the saved profile preset when present (`explicitWindowStated` flag), and derives `dailyAvailableMinutes` from that real window in full (no 2h/day haircut) instead of the multi-day default.
-- New **deterministic-only fast path**: when the request states both a working-hours window *and* a hard constraint the deterministic skeleton already fully enforces (fixed events or a focus/break rule), the LLM refinement call is skipped entirely — `buildScheduleSkeleton()` already respects working hours, fixed events, break rules, dependency order, and priority order, and the one LLM instruction that mattered (Rule 4) was actively wrong for this case. This is both a correctness fix (no more "spread thin" prompt fighting a correct skeleton) and a token-usage cut (saves the `generateText` + `parseJSONWithRepair` round-trip for exactly the requests where that call added the least value). The skip path is scored on the same post-processing checks as an LLM response (dependency/hours/buffer validation) starting from a high baseline (92, not the 60 used for a genuine LLM-failure fallback) so it doesn't spuriously trigger `review_agent`'s extra LLM call.
-- Rule 4's wording is now conditional: only the "spread across many days" framing when no explicit window was stated; a "fill the stated window before rolling to a new day" framing otherwise (used on the LLM path when an explicit window is stated without fixed events/focus rule, e.g. a multi-day project scoped to real daily hours).
-- Extracted the repeated skeleton→scheduledTasks energy-level/deep-work conversion (previously duplicated in the infeasible-fallback and unparsable-LLM-fallback branches) into one `skeletonToScheduledTasks()` helper, now shared by those two branches and the new fast path.
-
-**Deliberately not done.** The task list the pipeline actually schedules for a request like this comes from `planning_agent`'s own decomposition, not the user's literally-typed tasks — the reported example's `planning` stage produced tasks like "Analyze production bug logs and isolate failure point" rather than the user's "Fix Production API Bug (Est: 1 hour)". That's a separate, upstream fidelity gap in `planning_agent` (should a request that already lists concrete tasks with estimates skip AI decomposition entirely?) and was out of scope here — fixing it would touch the core multi-day project pipeline that most other users depend on. This fix makes the *scheduler* place whatever task list it's given correctly inside a stated window; it does not by itself make the pipeline reproduce the user's exact task list verbatim.
-
-**Manual-project calendar sync gap.** `POST /api/tasks/manual` (`ManualProjectBuilder`) never populated `context.schedule` — by design, sync was meant to happen only after "Let AI enhance" runs the full scheduler (`PATCH /calendar-sync` and the orchestrator's calendar step both gate on `context.schedule?.scheduledTasks?.length`). But nothing let a fully manually-scheduled project (the user names every subtask's own time) skip straight to being scheduled+synced without invoking the AI pipeline at all — which defeats the purpose of "manual mode" as a no-AI fallback. Added an optional per-subtask `startTime` field to `ManualProjectBuilder`; when *every* subtask in the project has one, `POST /api/tasks/manual` now builds `context.schedule` directly from those times and (if calendar sync is enabled) calls `syncScheduleToCalendar()` immediately, matching the shape the AI-generated path already produces. Deliberately gated on *all* subtasks having a time, not just one: `runSchedulerAgent` only ever runs when `context.schedule` is still null, so a partially-timed project must stay unscheduled until "Let AI enhance" — setting `context.schedule` early would otherwise permanently strand the untimed subtasks with no schedule and no calendar event, even after enhancement.
-
-**Files changed:**
-- `server/agents/intent_context_agent/prompt_v1.js` — `workStartHour`/`workEndHour` extraction.
-- `server/agents/intent_context_agent/schema.js` — non-blocking shape validation for the two new optional fields.
-- `server/agents/scheduler_agent/agent.js` — `resolveWorkingHours()` intent-override + capacity derivation; `skeletonToScheduledTasks()` helper; deterministic-only fast path in `runSchedulerAgent()`.
-- `server/agents/scheduler_agent/prompt_v1.js` — conditional Rule 4 wording; `explicitWindowStated` param.
-- `server/agents/scheduler_agent/agent.test.js` — new tests for intent-stated window resolution and the deterministic-only fast path (asserts zero LLM calls, 09:00–18:00 compliance, no overlap with the fixed event).
-- `client/src/pages/ManualProjectBuilder.jsx` — per-subtask start-time input; sync-readiness hint text.
-- `server/routes/tasks.js` — `POST /manual` builds `context.schedule` + syncs to calendar when every subtask has a start time.
-
-**Verified:** `node --test` on `scheduler_agent/agent.test.js` (41/41, including 3 new tests) and `intent_context_agent/agent.test.js` (8/8) pass. `client` production build (`vite build`) succeeds with the new UI field. `routes/tasks.js` has no existing automated test coverage (none existed before this change either) — the manual-mode calendar-sync path was verified by code review against the exact same `syncScheduleToCalendar()`/`context.schedule` shape the AI-generated path already uses and already exercises in production, not by a new integration test.
 
 ---
 
