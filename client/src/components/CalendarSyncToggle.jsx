@@ -1,4 +1,5 @@
 ﻿import { useState } from 'react';
+import { Calendar, CalendarOff } from 'lucide-react';
 import { setTaskCalendarSync } from '../api/index.js';
 
 /**
@@ -12,8 +13,8 @@ export default function CalendarSyncToggle({ taskId, initialEnabled = true, cale
 
   if (!calendarConnected) {
     return (
-      <span className="text-xs text-white/25 flex items-center gap-1" title="Connect Google Calendar to enable per-project sync">
-        <span>📅</span> Calendar not connected
+      <span className="text-xs text-muted flex items-center gap-1" title="Connect Google Calendar to enable per-project sync">
+        <CalendarOff className="w-3.5 h-3.5" /> Calendar not connected
       </span>
     );
   }
@@ -40,10 +41,10 @@ export default function CalendarSyncToggle({ taskId, initialEnabled = true, cale
       onClick={handleToggle}
       disabled={loading}
       title={enabled ? 'Disable Google Calendar sync for this project' : 'Enable Google Calendar sync for this project'}
-      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border
+      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors border
         ${enabled
-          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-          : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10 hover:text-white/50'
+          ? 'bg-success/10 text-success border-success/30 hover:bg-success/20'
+          : 'bg-surface-hover text-muted border-border hover:text-secondary'
         } ${loading ? 'opacity-60 cursor-wait' : 'cursor-pointer'}`}
     >
       {loading ? (
@@ -52,7 +53,7 @@ export default function CalendarSyncToggle({ taskId, initialEnabled = true, cale
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
       ) : (
-        <span>{enabled ? '📅' : '🚫'}</span>
+        enabled ? <Calendar className="w-3 h-3" /> : <CalendarOff className="w-3 h-3" />
       )}
       {enabled ? 'Calendar synced' : 'Sync off'}
     </button>

@@ -8,24 +8,24 @@ import ResourceLink from '../components/ResourceLink.jsx';
 import MarkdownText from '../components/MarkdownText.jsx';
 import { getProjectTask, updateExecutionStep, setTaskNote } from '../api/index.js';
 
-const DIFFICULTY_COLOR = { low: 'text-emerald-400', medium: 'text-amber-400', high: 'text-rose-400', very_high: 'text-rose-500' };
+const DIFFICULTY_COLOR = { low: 'text-success', medium: 'text-warning', high: 'text-danger', very_high: 'text-danger' };
 
 function Section({ title, children }) {
   return (
     <div>
-      <p className="text-xs text-white/35 uppercase tracking-wide font-semibold mb-2">{title}</p>
+      <p className="text-xs text-muted uppercase tracking-wide font-semibold mb-2">{title}</p>
       {children}
     </div>
   );
 }
 
 function BulletList({ items, icon = '•' }) {
-  if (!items || items.length === 0) return <p className="text-sm text-white/25">None listed.</p>;
+  if (!items || items.length === 0) return <p className="text-sm text-muted">None listed.</p>;
   return (
     <ul className="space-y-1.5">
       {items.map((item, i) => (
-        <li key={i} className="text-sm text-white/60 leading-relaxed flex gap-2">
-          <span className="text-white/25 flex-shrink-0">{icon}</span>
+        <li key={i} className="text-sm text-secondary leading-relaxed flex gap-2">
+          <span className="text-muted flex-shrink-0">{icon}</span>
           <span>{typeof item === 'string' ? item : JSON.stringify(item)}</span>
         </li>
       ))}
@@ -56,7 +56,7 @@ function TaskNote({ projectId, taskId, initialText, onSaved }) {
     <div>
       {!editing && (
         <div className="flex justify-end mb-1">
-          <button onClick={() => setEditing(true)} className="text-xs text-brand-400 hover:text-brand-300">
+          <button onClick={() => setEditing(true)} className="text-xs text-brand-500 hover:text-brand-400">
             {initialText ? 'Edit' : '+ Add note'}
           </button>
         </div>
@@ -73,7 +73,7 @@ function TaskNote({ projectId, taskId, initialText, onSaved }) {
           className="input-field text-sm"
         />
       ) : (
-        <MarkdownText text={initialText} className="text-sm text-white/60 leading-relaxed" />
+        <MarkdownText text={initialText} className="text-sm text-secondary leading-relaxed" />
       )}
     </div>
   );
@@ -98,11 +98,11 @@ function TaskTimeline({ project, task }) {
       {stages.map((s, i) => (
         <div key={s.label} className="flex items-center flex-shrink-0">
           <div className="flex flex-col items-center gap-1.5 px-2">
-            <span className={`w-2.5 h-2.5 rounded-full ${s.at ? 'bg-brand-400' : 'bg-white/10'}`} />
-            <span className={`text-[11px] whitespace-nowrap ${s.at ? 'text-white/60' : 'text-white/25'}`}>{s.label}</span>
-            {s.at && <span className="text-[10px] text-white/25 whitespace-nowrap">{format(new Date(s.at), 'MMM d')}</span>}
+            <span className={`w-2.5 h-2.5 rounded-full ${s.at ? 'bg-brand-400' : 'bg-border'}`} />
+            <span className={`text-[11px] whitespace-nowrap ${s.at ? 'text-secondary' : 'text-muted'}`}>{s.label}</span>
+            {s.at && <span className="text-[10px] text-muted whitespace-nowrap">{format(new Date(s.at), 'MMM d')}</span>}
           </div>
-          {i < stages.length - 1 && <div className={`w-8 h-px flex-shrink-0 ${s.at ? 'bg-brand-400/40' : 'bg-white/10'}`} />}
+          {i < stages.length - 1 && <div className={`w-8 h-px flex-shrink-0 ${s.at ? 'bg-brand-400/40' : 'bg-border'}`} />}
         </div>
       ))}
     </div>
@@ -146,7 +146,7 @@ export default function TaskWorkspace() {
   if (loading) {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
-        <div className="card h-40 animate-pulse bg-surface-800/50" />
+        <div className="card h-40 animate-pulse bg-surface-hover" />
       </div>
     );
   }
@@ -155,7 +155,7 @@ export default function TaskWorkspace() {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
         <Breadcrumbs items={[{ label: 'Dashboard', to: '/' }, { label: 'Not found' }]} />
-        <div className="card p-8 text-center text-sm text-rose-400">{error || 'Task not found'}</div>
+        <div className="card p-8 text-center text-sm text-danger">{error || 'Task not found'}</div>
       </div>
     );
   }
@@ -187,18 +187,18 @@ export default function TaskWorkspace() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-            <span className={`text-xs font-semibold capitalize ${DIFFICULTY_COLOR[task.difficulty] || 'text-white/40'}`}>{task.difficulty?.replace('_', ' ')}</span>
-            <span className="text-white/15">·</span>
-            <span className="text-xs text-white/40 capitalize">{task.priority} priority</span>
+            <span className={`text-xs font-semibold capitalize ${DIFFICULTY_COLOR[task.difficulty] || 'text-muted'}`}>{task.difficulty?.replace('_', ' ')}</span>
+            <span className="text-muted">·</span>
+            <span className="text-xs text-muted capitalize">{task.priority} priority</span>
             {task.deadline && (
               <>
-                <span className="text-white/15">·</span>
-                <span className="text-xs text-white/40">Due {format(new Date(task.deadline), 'MMM d, yyyy')}</span>
+                <span className="text-muted">·</span>
+                <span className="text-xs text-muted">Due {format(new Date(task.deadline), 'MMM d, yyyy')}</span>
               </>
             )}
-            {task.status === 'completed' && <span className="text-xs text-emerald-400">· ✓ Completed</span>}
+            {task.status === 'completed' && <span className="text-xs text-success">· ✓ Completed</span>}
           </div>
-          <h1 className="text-2xl font-bold text-white">{task.title}</h1>
+          <h1 className="text-2xl font-bold text-primary">{task.title}</h1>
         </div>
         <button onClick={() => setFocusMode(true)} className="btn-primary flex-shrink-0">▶ Start Working</button>
       </div>
@@ -206,23 +206,23 @@ export default function TaskWorkspace() {
       {/* Progress */}
       <div className="card p-4">
         <div className="flex items-center justify-between text-xs mb-1.5">
-          <span className="text-white/40">Progress</span>
-          <span className="font-semibold text-white/70">{task.progress}%</span>
+          <span className="text-muted">Progress</span>
+          <span className="font-semibold text-secondary font-mono tabular-nums">{task.progress}%</span>
         </div>
-        <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-          <div className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-400 transition-all duration-500" style={{ width: `${task.progress}%` }} />
+        <div className="h-2 rounded-full bg-border overflow-hidden">
+          <div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${task.progress}%` }} />
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-xs">
-          <div><span className="text-white/30">Estimated</span><p className="text-white/70 font-medium mt-0.5">{task.estimatedMinutes ?? '—'} min</p></div>
-          <div><span className="text-white/30">Actual</span><p className="text-white/70 font-medium mt-0.5">{task.actualMinutes ?? '—'} min</p></div>
-          <div><span className="text-white/30">Dependencies</span><p className="text-white/70 font-medium mt-0.5">{task.dependencies?.length || 'None'}</p></div>
-          <div><span className="text-white/30">Steps</span><p className="text-white/70 font-medium mt-0.5">{sortedSteps.filter(s => s.status === 'completed').length}/{sortedSteps.length}</p></div>
+          <div><span className="text-muted">Estimated</span><p className="text-secondary font-medium mt-0.5 font-mono tabular-nums">{task.estimatedMinutes ?? '—'} min</p></div>
+          <div><span className="text-muted">Actual</span><p className="text-secondary font-medium mt-0.5 font-mono tabular-nums">{task.actualMinutes ?? '—'} min</p></div>
+          <div><span className="text-muted">Dependencies</span><p className="text-secondary font-medium mt-0.5">{task.dependencies?.length || 'None'}</p></div>
+          <div><span className="text-muted">Steps</span><p className="text-secondary font-medium mt-0.5 font-mono tabular-nums">{sortedSteps.filter(s => s.status === 'completed').length}/{sortedSteps.length}</p></div>
         </div>
       </div>
 
       {task.overview && (
         <Section title="Overview">
-          <p className="text-sm text-white/60 leading-relaxed">{task.overview}</p>
+          <p className="text-sm text-secondary leading-relaxed">{task.overview}</p>
         </Section>
       )}
 

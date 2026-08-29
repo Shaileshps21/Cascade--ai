@@ -15,11 +15,15 @@ export default function RiskMeter({ score = 0, size = 'md' }) {
   const arcLength = circumference * 0.75;
   const offset = arcLength - (score / 100) * arcLength;
 
-  const color =
-    score >= 80 ? '#f43f5e'   // rose
-    : score >= 55 ? '#f59e0b' // amber
-    : score >= 30 ? '#6366f1' // indigo
-    : '#10b981';              // emerald
+  // A Tailwind text-color class, consumed by the SVG via `stroke="currentColor"`
+  // — this (rather than resolving the CSS var in JS) is what makes the arc
+  // repaint automatically on a theme toggle, the same pattern the Dashboard's
+  // StatCard donut ring uses.
+  const colorClass =
+    score >= 80 ? 'text-danger'
+    : score >= 55 ? 'text-warning'
+    : score >= 30 ? 'text-brand-500'
+    : 'text-success';
 
   const label =
     score >= 80 ? 'HIGH'
@@ -40,7 +44,8 @@ export default function RiskMeter({ score = 0, size = 'md' }) {
           cy={cy}
           r={radius}
           fill="none"
-          stroke="#1c2136"
+          stroke="currentColor"
+          className="text-border"
           strokeWidth={stroke}
           strokeDasharray={`${arcLength} ${circumference}`}
           strokeLinecap="round"
@@ -51,22 +56,23 @@ export default function RiskMeter({ score = 0, size = 'md' }) {
           cy={cy}
           r={radius}
           fill="none"
-          stroke={color}
+          stroke="currentColor"
+          className={colorClass}
           strokeWidth={stroke}
           strokeDasharray={`${arcLength} ${circumference}`}
           strokeDashoffset={offset}
           strokeLinecap="round"
-          style={{ transition: 'stroke-dashoffset 0.8s ease, stroke 0.5s ease' }}
+          style={{ transition: 'stroke-dashoffset 0.8s ease' }}
         />
       </svg>
 
       {/* Score label (centered over arc) */}
       <div className={`-mt-2 text-center ${isSmall ? 'text-xs' : 'text-sm'}`}>
-        <div className="font-bold text-white" style={{ color }}>
+        <div className={`font-bold font-mono tabular-nums ${colorClass}`}>
           {isSmall ? score : `${score}`}
         </div>
         {!isSmall && (
-          <div className="text-[10px] font-semibold tracking-widest" style={{ color }}>
+          <div className={`text-[10px] font-semibold tracking-widest ${colorClass}`}>
             {label}
           </div>
         )}

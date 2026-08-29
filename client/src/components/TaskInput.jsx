@@ -603,6 +603,7 @@
 // ------------------------------new file-------------------------------------------------------------
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Calendar, X, AlertTriangle, Check } from 'lucide-react';
 import { initiateTask } from '../api/index.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -641,7 +642,7 @@ function timeLabel(localString) {
   if (!localString) return '';
   // Parse datetime-local string as LOCAL time
   const diff = new Date(localString) - Date.now();
-  if (diff <= 0) return '⚠️ Already passed';
+  if (diff <= 0) return 'Already passed';
   const h = Math.floor(diff / 3_600_000);
   const m = Math.floor((diff % 3_600_000) / 60_000);
   if (h === 0) return `${m}m from now`;
@@ -730,12 +731,11 @@ export default function TaskInput({ onProcessStart }) {
   };
 
   return (
-    <div className="card p-5 space-y-4">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <span className="text-lg">⚡</span>
-        <h2 className="font-semibold text-white">Add a Task</h2>
-        <span className="text-xs text-white/25 ml-auto font-mono">⌘↵ submit</span>
+        <h2 className="text-xs text-muted uppercase tracking-wide font-semibold">Goal</h2>
+        <span className="text-xs text-muted ml-auto font-mono">⌘↵ submit</span>
       </div>
 
       {/* Task description */}
@@ -754,14 +754,14 @@ export default function TaskInput({ onProcessStart }) {
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setShowPicker((v) => !v)}
-            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all ${deadline
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${deadline
               ? deadlinePassed
-                ? 'border-rose-500/40 bg-rose-500/10 text-rose-400'
-                : 'border-brand-500/40 bg-brand-500/10 text-brand-400'
-              : 'border-white/10 text-white/30 hover:border-white/20 hover:text-white/50'
+                ? 'border-danger/40 bg-danger/10 text-danger'
+                : 'border-brand-500/40 bg-brand-500/10 text-brand-500'
+              : 'border-border text-muted hover:border-border-strong hover:text-secondary'
               }`}
           >
-            <span>📅</span>
+            <Calendar className="w-3.5 h-3.5" />
             {deadline
               ? <span className="font-medium">{formatDeadlineDisplay(deadline)}</span>
               : <span>Set deadline</span>
@@ -770,20 +770,21 @@ export default function TaskInput({ onProcessStart }) {
 
           {deadline && (
             <>
-              <span className={`text-xs ${deadlinePassed ? 'text-rose-400' : 'text-white/30'}`}>
+              <span className={`flex items-center gap-1 text-xs ${deadlinePassed ? 'text-danger' : 'text-muted'}`}>
+                {deadlinePassed && <AlertTriangle className="w-3 h-3" />}
                 {timeLabel(deadline)}
               </span>
               <button
                 onClick={() => { setDeadline(''); setShowPicker(false); }}
-                className="text-xs text-white/20 hover:text-white/50 ml-auto"
+                className="flex items-center gap-1 text-xs text-muted hover:text-secondary ml-auto"
               >
-                ✕ clear
+                <X className="w-3 h-3" /> clear
               </button>
             </>
           )}
 
           {!deadline && (
-            <span className="text-xs text-white/20 ml-1">
+            <span className="text-xs text-muted ml-1">
               or let AI infer from your description
             </span>
           )}
@@ -791,10 +792,10 @@ export default function TaskInput({ onProcessStart }) {
 
         {/* Expanded picker */}
         {showPicker && (
-          <div className="p-3 rounded-xl border border-white/10 bg-surface-900 space-y-3 animate-fade-in">
+          <div className="p-3 rounded-xl border border-border bg-elevated space-y-3 animate-fade-in">
             {/* Quick presets */}
             <div>
-              <p className="text-[11px] text-white/30 mb-2 font-medium uppercase tracking-wider">
+              <p className="text-[11px] text-muted mb-2 font-medium uppercase tracking-wider">
                 Quick pick
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -804,9 +805,9 @@ export default function TaskInput({ onProcessStart }) {
                     <button
                       key={p.label}
                       onClick={() => setDeadline(presetVal)}
-                      className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${deadline === presetVal
-                        ? 'border-brand-500/60 bg-brand-500/15 text-brand-400'
-                        : 'border-white/10 text-white/40 hover:border-white/25 hover:text-white/70'
+                      className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${deadline === presetVal
+                        ? 'border-brand-500/60 bg-brand-500/15 text-brand-500'
+                        : 'border-border text-muted hover:border-border-strong hover:text-secondary'
                         }`}
                     >
                       {p.label}
@@ -818,7 +819,7 @@ export default function TaskInput({ onProcessStart }) {
 
             {/* Exact date-time */}
             <div>
-              <p className="text-[11px] text-white/30 mb-1.5 font-medium uppercase tracking-wider">
+              <p className="text-[11px] text-muted mb-1.5 font-medium uppercase tracking-wider">
                 Exact date & time
               </p>
               <input
@@ -826,24 +827,26 @@ export default function TaskInput({ onProcessStart }) {
                 value={deadline}
                 min={minDateTime()}
                 onChange={(e) => setDeadline(e.target.value)}
-                className="input-field text-sm text-white/80 [color-scheme:dark]"
+                className="input-field text-sm text-primary"
               />
               {/* Confirm what was selected */}
               {deadline && !deadlinePassed && (
-                <p className="text-[11px] text-emerald-400/70 mt-1.5">
-                  ✓ Deadline set: {new Date(deadline).toLocaleString()} — {timeLabel(deadline)}
+                <p className="flex items-center gap-1 text-[11px] text-success mt-1.5">
+                  <Check className="w-3 h-3" /> Deadline set: {new Date(deadline).toLocaleString()} — {timeLabel(deadline)}
                 </p>
               )}
             </div>
 
             {deadlinePassed && (
-              <p className="text-xs text-rose-400">⚠️ This time has already passed.</p>
+              <p className="flex items-center gap-1 text-xs text-danger">
+                <AlertTriangle className="w-3.5 h-3.5" /> This time has already passed.
+              </p>
             )}
           </div>
         )}
       </div>
 
-      {error && <p className="text-xs text-rose-400">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
 
       {/* Calendar sync option — shown only if calendar is connected */}
       {profile?.calendarConnected && (
@@ -854,15 +857,15 @@ export default function TaskInput({ onProcessStart }) {
             onChange={(e) => setCalendarSync(e.target.checked)}
             className="w-3.5 h-3.5 rounded accent-brand-500 cursor-pointer"
           />
-          <span className="text-xs text-white/40 hover:text-white/60 transition-colors">
-            📅 Sync to Google Calendar
+          <span className="flex items-center gap-1.5 text-xs text-muted hover:text-secondary transition-colors">
+            <Calendar className="w-3.5 h-3.5" /> Sync to Google Calendar
           </span>
         </label>
       )}
 
       {/* Footer */}
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-white/20 hidden sm:block">
+        <p className="text-xs text-muted hidden sm:block">
           AI agents parse → prioritize → plan → schedule automatically.
         </p>
         <div className="flex items-center gap-3 ml-auto">
@@ -871,7 +874,7 @@ export default function TaskInput({ onProcessStart }) {
               plan and just wants tracking + scheduling. */}
           <Link
             to="/projects/new/manual"
-            className="text-xs text-white/40 hover:text-white/70 transition-colors whitespace-nowrap"
+            className="text-xs text-muted hover:text-secondary transition-colors whitespace-nowrap"
           >
             Add manually →
           </Link>

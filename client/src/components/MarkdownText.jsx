@@ -15,7 +15,7 @@ function renderInline(text, keyPrefix) {
     }
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
-        <code key={key} className="px-1 py-0.5 rounded bg-white/10 text-[0.9em] font-mono">
+        <code key={key} className="px-1 py-0.5 rounded bg-surface-hover text-[0.9em] font-mono">
           {part.slice(1, -1)}
         </code>
       );
@@ -28,7 +28,7 @@ function renderInline(text, keyPrefix) {
       // that isn't http(s) or mailto.
       if (/^(https?:|mailto:)/i.test(linkMatch[2].trim())) {
         return (
-          <a key={key} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" className="text-brand-400 hover:underline">
+          <a key={key} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" className="text-brand-500 hover:underline">
             {linkMatch[1]}
           </a>
         );

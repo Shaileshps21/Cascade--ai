@@ -6,10 +6,10 @@ import { createManualProject } from '../api/index.js';
 
 const PRIORITIES = ['low', 'medium', 'high', 'critical'];
 const PRIORITY_STYLES = {
-  low: 'text-white/40 border-white/10',
-  medium: 'text-amber-400 border-amber-500/30',
+  low: 'text-muted border-border',
+  medium: 'text-warning border-warning/30',
   high: 'text-orange-400 border-orange-500/30',
-  critical: 'text-rose-400 border-rose-500/30',
+  critical: 'text-danger border-danger/30',
 };
 
 let uid = 0;
@@ -125,8 +125,8 @@ export default function ManualProjectBuilder() {
       <Breadcrumbs items={[{ label: 'Dashboard', to: '/' }, { label: 'Add manually' }]} />
 
       <div>
-        <h1 className="text-2xl font-bold text-white">✏️ Build a project manually</h1>
-        <p className="text-sm text-white/40 mt-1">
+        <h1 className="text-2xl font-bold text-primary">✏️ Build a project manually</h1>
+        <p className="text-sm text-muted mt-1">
           Skip the AI pipeline — type your milestones and subtasks directly. Works offline, and
           even when the API quota is exhausted. You can always press "Let AI enhance" later.
         </p>
@@ -135,7 +135,7 @@ export default function ManualProjectBuilder() {
       {/* Project title + deadline */}
       <div className="card p-5 space-y-4">
         <div>
-          <label className="text-xs text-white/30 uppercase tracking-wide font-semibold">Project title</label>
+          <label className="text-xs text-muted uppercase tracking-wide font-semibold">Project title</label>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -145,14 +145,14 @@ export default function ManualProjectBuilder() {
         </div>
         <div className="flex items-center gap-4 flex-wrap">
           <div>
-            <label className="text-xs text-white/30 uppercase tracking-wide font-semibold">
+            <label className="text-xs text-muted uppercase tracking-wide font-semibold">
               Overall deadline (optional)
             </label>
             <input
               type="datetime-local"
               value={deadline}
               onChange={(e) => setDeadline(e.target.value)}
-              className="input-field mt-1.5 text-sm [color-scheme:dark]"
+              className="input-field mt-1.5 text-sm"
             />
           </div>
           {profile?.calendarConnected && (
@@ -163,7 +163,7 @@ export default function ManualProjectBuilder() {
                 onChange={(e) => setCalendarSync(e.target.checked)}
                 className="w-3.5 h-3.5 rounded accent-brand-500 cursor-pointer"
               />
-              <span className="text-xs text-white/40 hover:text-white/60 transition-colors">
+              <span className="text-xs text-muted hover:text-secondary transition-colors">
                 📅 Sync to Google Calendar once scheduled
               </span>
             </label>
@@ -176,7 +176,7 @@ export default function ManualProjectBuilder() {
         {modules.map((mod, mi) => (
           <div key={mod.id} className="card p-5 space-y-3">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-white/25 font-mono flex-shrink-0">M{mi + 1}</span>
+              <span className="text-xs text-muted font-mono flex-shrink-0">M{mi + 1}</span>
               <input
                 value={mod.title}
                 onChange={(e) => updateModule(mod.id, { title: e.target.value })}
@@ -187,7 +187,7 @@ export default function ManualProjectBuilder() {
                 <button
                   type="button"
                   onClick={() => removeModule(mod.id)}
-                  className="text-white/20 hover:text-rose-400 transition-colors px-1.5 flex-shrink-0"
+                  className="text-muted hover:text-danger transition-colors px-1.5 flex-shrink-0"
                   title="Remove module"
                 >
                   ✕
@@ -195,7 +195,7 @@ export default function ManualProjectBuilder() {
               )}
             </div>
 
-            <div className="space-y-2 pl-2 sm:pl-6 border-l border-white/5">
+            <div className="space-y-2 pl-2 sm:pl-6 border-l border-border">
               {mod.subtasks.map((st) => (
                 <div key={st.id} className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                   <input
@@ -225,14 +225,14 @@ export default function ManualProjectBuilder() {
                     type="date"
                     value={st.deadline}
                     onChange={(e) => updateSubtask(mod.id, st.id, { deadline: e.target.value })}
-                    className="input-field w-36 text-xs py-1.5 [color-scheme:dark]"
+                    className="input-field w-36 text-xs py-1.5"
                     title="Subtask deadline (optional)"
                   />
                   {mod.subtasks.length > 1 && (
                     <button
                       type="button"
                       onClick={() => removeSubtask(mod.id, st.id)}
-                      className="text-white/20 hover:text-rose-400 transition-colors px-1 flex-shrink-0"
+                      className="text-muted hover:text-danger transition-colors px-1 flex-shrink-0"
                       title="Remove subtask"
                     >
                       ✕
@@ -243,7 +243,7 @@ export default function ManualProjectBuilder() {
               <button
                 type="button"
                 onClick={() => addSubtask(mod.id)}
-                className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+                className="text-xs text-brand-500 hover:text-brand-400 transition-colors"
               >
                 + Add subtask
               </button>
@@ -254,7 +254,7 @@ export default function ManualProjectBuilder() {
         <button
           type="button"
           onClick={addModule}
-          className="w-full py-2.5 rounded-xl border border-dashed border-white/15 text-sm text-white/40 hover:text-white/70 hover:border-white/30 transition-all"
+          className="w-full py-2.5 rounded-xl border border-dashed border-border text-sm text-muted hover:text-secondary hover:border-border-strong transition-colors"
         >
           + Add module
         </button>
@@ -262,12 +262,12 @@ export default function ManualProjectBuilder() {
 
       {/* Running total + save */}
       <div className="card p-4 flex items-center justify-between flex-wrap gap-3 sticky bottom-4">
-        <p className="text-xs text-white/40">
+        <p className="text-xs text-muted">
           {totalSubtasks} subtask{totalSubtasks === 1 ? '' : 's'} · Total estimated:{' '}
-          <span className="text-white/70 font-semibold">{totalHours}h</span>
+          <span className="text-secondary font-semibold font-mono tabular-nums">{totalHours}h</span>
         </p>
         <div className="flex items-center gap-3">
-          {error && <p className="text-xs text-rose-400">{error}</p>}
+          {error && <p className="text-xs text-danger">{error}</p>}
           <button onClick={handleSave} disabled={saving} className="btn-primary text-sm">
             {saving ? 'Saving…' : 'Save → Dashboard'}
           </button>

@@ -7,8 +7,8 @@ import { Link } from 'react-router-dom';
 export default function NextBestAction({ projectId, action }) {
   if (!action) {
     return (
-      <div className="card p-4 border border-emerald-500/20 bg-emerald-500/5 text-center">
-        <p className="text-sm text-emerald-400 font-medium">🎉 Everything's done here.</p>
+      <div className="card p-4 border border-success/20 bg-success/5 text-center">
+        <p className="text-sm text-success font-medium">🎉 Everything's done here.</p>
       </div>
     );
   }
@@ -20,18 +20,18 @@ export default function NextBestAction({ projectId, action }) {
     >
       <span className="text-2xl flex-shrink-0">▶</span>
       <div className="flex-1 min-w-0">
-        <p className="text-[10px] font-semibold text-brand-400 uppercase tracking-wide">Continue Working</p>
-        <p className="text-sm font-semibold text-white mt-0.5 truncate">{action.taskTitle}</p>
+        <p className="text-[10px] font-semibold text-brand-500 uppercase tracking-wide">Continue Working</p>
+        <p className="text-sm font-semibold text-primary mt-0.5 truncate">{action.taskTitle}</p>
         {action.stepTitle && (
-          <p className="text-xs text-white/45 mt-0.5 truncate">Next step: {action.stepTitle}</p>
+          <p className="text-xs text-muted mt-0.5 truncate">Next step: {action.stepTitle}</p>
         )}
       </div>
       {action.estimatedMinutes != null && (
-        <span className="text-xs font-medium text-white/50 flex-shrink-0 bg-white/5 px-2.5 py-1 rounded-full">
+        <span className="text-xs font-medium text-secondary flex-shrink-0 bg-surface-hover px-2.5 py-1 rounded-full font-mono tabular-nums">
           ~{action.estimatedMinutes} min
         </span>
       )}
-      <span className="text-brand-400 group-hover:translate-x-0.5 transition-transform flex-shrink-0">→</span>
+      <span className="text-brand-500 group-hover:translate-x-0.5 transition-transform flex-shrink-0">→</span>
     </Link>
   );
 }

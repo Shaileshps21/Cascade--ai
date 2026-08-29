@@ -345,52 +345,53 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { Sunrise, Eye, Zap, Siren, Pin, Flame, AlertTriangle, Calendar, CheckCircle2, Lightbulb, Sparkles, Target, ChevronUp, ChevronDown, X, RefreshCw } from 'lucide-react';
 import { getTodaysBriefing, generateBriefing, markBriefingSeen, dismissBriefing } from '../api/index.js';
 
 const URGENCY_STYLES = {
     calm: {
-        border: 'border-emerald-500/20', bg: 'bg-emerald-500/5',
-        badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-        icon: '🌅', label: 'All Clear',
+        border: 'border-success/20', bg: 'bg-success/5',
+        badge: 'bg-success/15 text-success border-success/30',
+        icon: Sunrise, label: 'All Clear',
     },
     watchful: {
         border: 'border-brand-500/25', bg: 'bg-brand-500/5',
-        badge: 'bg-brand-500/15 text-brand-400 border-brand-500/30',
-        icon: '👁️', label: 'Stay Alert',
+        badge: 'bg-brand-500/15 text-brand-500 border-brand-500/30',
+        icon: Eye, label: 'Stay Alert',
     },
     urgent: {
-        border: 'border-amber-500/35', bg: 'bg-amber-500/5',
-        badge: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-        icon: '⚡', label: 'Urgent',
+        border: 'border-warning/35', bg: 'bg-warning/5',
+        badge: 'bg-warning/15 text-warning border-warning/30',
+        icon: Zap, label: 'Urgent',
     },
     critical: {
-        border: 'border-rose-500/40', bg: 'bg-rose-500/5',
-        badge: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
-        icon: '🚨', label: 'Critical',
+        border: 'border-danger/40', bg: 'bg-danger/5',
+        badge: 'bg-danger/15 text-danger border-danger/30',
+        icon: Siren, label: 'Critical',
     },
 };
 
 const URGENCY_COLORS = {
-    overdue: 'text-rose-400 bg-rose-500/10 border-rose-500/25',
-    critical: 'text-rose-400 bg-rose-500/10 border-rose-500/25',
-    urgent: 'text-amber-400 bg-amber-500/10 border-amber-500/25',
-    normal: 'text-brand-400 bg-brand-500/10 border-brand-500/25',
+    overdue: 'text-danger bg-danger/10 border-danger/25',
+    critical: 'text-danger bg-danger/10 border-danger/25',
+    urgent: 'text-warning bg-warning/10 border-warning/25',
+    normal: 'text-brand-500 bg-brand-500/10 border-brand-500/25',
 };
 
 function FocusBlock({ block, index }) {
     const colors = URGENCY_COLORS[block.urgency] || URGENCY_COLORS.normal;
     return (
         <div className={`flex items-start gap-3 p-3 rounded-xl border ${colors}`}>
-            <div className="flex-shrink-0 text-center min-w-[52px]">
+            <div className="flex-shrink-0 text-center min-w-[52px] font-mono tabular-nums">
                 <p className="text-xs font-bold text-current">{block.time}</p>
                 <p className="text-[10px] text-current/60">{block.endTime}</p>
             </div>
             <div className="w-px self-stretch bg-current/20 flex-shrink-0" />
             <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white leading-tight">{block.subtask}</p>
-                <p className="text-xs text-white/45 mt-0.5">{block.task}</p>
+                <p className="text-sm font-semibold text-primary leading-tight">{block.subtask}</p>
+                <p className="text-xs text-muted mt-0.5">{block.task}</p>
             </div>
-            <div className="flex-shrink-0 text-right">
+            <div className="flex-shrink-0 text-right font-mono tabular-nums">
                 <p className="text-xs font-medium text-current">{block.duration}m</p>
                 {block.hoursLeft < 24 && (
                     <p className="text-[10px] text-current/60">{Math.round(block.hoursLeft)}h left</p>
@@ -400,16 +401,18 @@ function FocusBlock({ block, index }) {
     );
 }
 
-function TriagePill({ label, tasks, color }) {
+function TriagePill({ icon: Icon, label, tasks, color }) {
     if (!tasks?.length) return null;
     return (
         <div className="flex items-center gap-1.5 flex-wrap">
-            <span className={`text-[11px] font-medium ${color}`}>{label}</span>
+            <span className={`flex items-center gap-1 text-[11px] font-medium ${color}`}>
+                <Icon className="w-3 h-3 flex-shrink-0" /> {label}
+            </span>
             {tasks.map((t, i) => (
-                <span key={i} className="text-[11px] bg-white/5 border border-white/10 px-2 py-0.5 rounded-full text-white/60">
+                <span key={i} className="text-[11px] bg-surface-hover border border-border px-2 py-0.5 rounded-full text-secondary">
                     {t.title}
                     {t.hoursLeft < 48 && (
-                        <span className="ml-1 text-white/30">
+                        <span className="ml-1 text-muted font-mono tabular-nums">
                             {t.hoursLeft < 1 ? `${Math.round(t.hoursLeft * 60)}m` : `${Math.round(t.hoursLeft)}h`}
                         </span>
                     )}
@@ -459,12 +462,12 @@ export default function DailyBriefing() {
     // ── Loading ───────────────────────────────────────────────────────────────
     if (loading) {
         return (
-            <div className="card p-4 border border-white/5 animate-pulse">
+            <div className="card p-4 border border-border animate-pulse">
                 <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-white/5" />
+                    <div className="w-8 h-8 rounded-full bg-surface-hover" />
                     <div className="space-y-1.5 flex-1">
-                        <div className="h-3.5 bg-white/5 rounded w-32" />
-                        <div className="h-2.5 bg-white/5 rounded w-64" />
+                        <div className="h-3.5 bg-surface-hover rounded w-32" />
+                        <div className="h-2.5 bg-surface-hover rounded w-64" />
                     </div>
                 </div>
             </div>
@@ -474,12 +477,12 @@ export default function DailyBriefing() {
     // ── Dismissed ─────────────────────────────────────────────────────────────
     if (dismissed && !generating) {
         return (
-            <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-white/5 bg-white/2">
-                <span className="text-white/20">🌅</span>
-                <span className="text-xs text-white/25">Briefing dismissed for today</span>
+            <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-surface">
+                <Sunrise className="w-4 h-4 text-muted" />
+                <span className="text-xs text-muted">Briefing dismissed for today</span>
                 <button
                     onClick={() => { setDismissed(false); if (!briefing) handleGenerate(); }}
-                    className="ml-auto text-xs text-white/25 hover:text-brand-400 transition-colors"
+                    className="ml-auto text-xs text-muted hover:text-brand-500 transition-colors"
                 >
                     Show again
                 </button>
@@ -492,13 +495,13 @@ export default function DailyBriefing() {
         return (
             <div className="card p-5 border border-brand-500/20 bg-brand-500/3">
                 <div className="flex items-center gap-3">
-                    <svg className="animate-spin w-5 h-5 text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                    <svg className="animate-spin w-5 h-5 text-brand-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
                     <div>
-                        <p className="text-sm font-medium text-white">Generating your morning briefing...</p>
-                        <p className="text-xs text-white/35">Analysing tasks · Building focus schedule · Writing insights</p>
+                        <p className="text-sm font-medium text-primary">Generating your morning briefing...</p>
+                        <p className="text-xs text-muted">Analysing tasks · Building focus schedule · Writing insights</p>
                     </div>
                 </div>
             </div>
@@ -508,12 +511,12 @@ export default function DailyBriefing() {
     // ── No briefing yet ───────────────────────────────────────────────────────
     if (!briefing) {
         return (
-            <div className="card p-4 border border-white/8">
+            <div className="card p-4 border border-border">
                 <div className="flex items-center gap-3">
-                    <span className="text-2xl flex-shrink-0">🌅</span>
+                    <Sunrise className="w-6 h-6 flex-shrink-0 text-muted" />
                     <div className="flex-1">
-                        <p className="text-sm font-semibold text-white">Morning briefing</p>
-                        <p className="text-xs text-white/35">
+                        <p className="text-sm font-semibold text-primary">Morning briefing</p>
+                        <p className="text-xs text-muted">
                             Auto-generates at 9 AM · Includes focus schedule + AI insights
                         </p>
                     </div>
@@ -521,7 +524,7 @@ export default function DailyBriefing() {
                         Generate Now
                     </button>
                 </div>
-                {error && <p className="text-xs text-rose-400 mt-2 px-1">{error}</p>}
+                {error && <p className="text-xs text-danger mt-2 px-1">{error}</p>}
             </div>
         );
     }
@@ -534,28 +537,28 @@ export default function DailyBriefing() {
             {/* ── Header ─────────────────────────────────────────────────────────── */}
             <div className="p-4">
                 <div className="flex items-start gap-3">
-                    <span className="text-2xl flex-shrink-0 mt-0.5">{u.icon}</span>
+                    <u.icon className="w-6 h-6 flex-shrink-0 mt-0.5 text-current" />
 
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                             <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${u.badge}`}>
                                 {u.label}
                             </span>
-                            <span className="text-[11px] text-white/25 font-mono">
+                            <span className="text-[11px] text-muted font-mono">
                                 {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
                             </span>
-                            <span className="text-[10px] text-white/15 ml-auto">AI Briefing · {briefing.llmProvider}</span>
+                            <span className="text-[10px] text-muted ml-auto">AI Briefing · {briefing.llmProvider}</span>
                         </div>
-                        <p className="text-sm font-semibold text-white leading-snug">{briefing.greeting}</p>
-                        <p className="text-sm text-white/55 mt-0.5 leading-snug">{briefing.headline}</p>
+                        <p className="text-sm font-semibold text-primary leading-snug">{briefing.greeting}</p>
+                        <p className="text-sm text-secondary mt-0.5 leading-snug">{briefing.headline}</p>
                     </div>
 
                     <div className="flex gap-1 flex-shrink-0">
-                        <button onClick={() => setExpanded(v => !v)} className="text-white/20 hover:text-white/50 p-1 text-sm">
-                            {expanded ? '▲' : '▼'}
+                        <button onClick={() => setExpanded(v => !v)} className="text-muted hover:text-secondary p-1">
+                            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
-                        <button onClick={handleDismiss} title="Dismiss" className="text-white/15 hover:text-white/50 p-1 text-sm">
-                            ✕
+                        <button onClick={handleDismiss} title="Dismiss" className="text-muted hover:text-secondary p-1">
+                            <X className="w-3.5 h-3.5" />
                         </button>
                     </div>
                 </div>
@@ -563,13 +566,13 @@ export default function DailyBriefing() {
 
             {/* ── Expanded ───────────────────────────────────────────────────────── */}
             {expanded && (
-                <div className="border-t border-white/5 px-4 pb-4 pt-3 space-y-4 animate-fade-in">
+                <div className="border-t border-border px-4 pb-4 pt-3 space-y-4 animate-fade-in">
 
                     {/* Focus Schedule */}
                     {briefing.focusSchedule?.length > 0 && (
                         <div>
-                            <p className="text-[11px] font-semibold text-white/30 uppercase tracking-wider mb-2">
-                                📌 Today's Focus Blocks
+                            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-muted uppercase tracking-wider mb-2">
+                                <Pin className="w-3 h-3" /> Today's Focus Blocks
                             </p>
                             <div className="space-y-2">
                                 {briefing.focusSchedule.map((block, i) => (
@@ -582,41 +585,41 @@ export default function DailyBriefing() {
                     {/* Triage pills */}
                     {briefing.triage && (
                         <div className="space-y-1.5">
-                            <TriagePill label="🔥 Fire now" tasks={briefing.triage.fireNow} color="text-rose-400" />
-                            <TriagePill label="⚠️ Due today" tasks={briefing.triage.dueToday} color="text-amber-400" />
-                            <TriagePill label="📅 This week" tasks={briefing.triage.dueWeek} color="text-brand-400" />
-                            <TriagePill label="✅ On track" tasks={briefing.triage.onTrack} color="text-emerald-400" />
+                            <TriagePill icon={Flame} label="Fire now" tasks={briefing.triage.fireNow} color="text-danger" />
+                            <TriagePill icon={AlertTriangle} label="Due today" tasks={briefing.triage.dueToday} color="text-warning" />
+                            <TriagePill icon={Calendar} label="This week" tasks={briefing.triage.dueWeek} color="text-brand-500" />
+                            <TriagePill icon={CheckCircle2} label="On track" tasks={briefing.triage.onTrack} color="text-success" />
                             {briefing.triage.overdue?.length > 0 && (
-                                <TriagePill label="🚨 Overdue" tasks={briefing.triage.overdue} color="text-rose-500" />
+                                <TriagePill icon={Siren} label="Overdue" tasks={briefing.triage.overdue} color="text-danger" />
                             )}
                         </div>
                     )}
 
                     {/* AI insights */}
-                    <div className="space-y-2 pt-1 border-t border-white/5">
+                    <div className="space-y-2 pt-1 border-t border-border">
                         {briefing.warning && (
-                            <div className="flex gap-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20">
-                                <span className="text-sm flex-shrink-0">⚠️</span>
-                                <p className="text-xs text-rose-300 leading-relaxed">{briefing.warning}</p>
+                            <div className="flex gap-2 p-2.5 rounded-lg bg-danger/10 border border-danger/20">
+                                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 text-danger mt-0.5" />
+                                <p className="text-xs text-danger leading-relaxed">{briefing.warning}</p>
                             </div>
                         )}
                         {briefing.insight && (
                             <div className="flex gap-2">
-                                <span className="text-sm flex-shrink-0">💡</span>
-                                <p className="text-xs text-white/50 leading-relaxed">{briefing.insight}</p>
+                                <Lightbulb className="w-3.5 h-3.5 flex-shrink-0 text-muted mt-0.5" />
+                                <p className="text-xs text-secondary leading-relaxed">{briefing.insight}</p>
                             </div>
                         )}
                         {briefing.motivationalNote && (
                             <div className="flex gap-2">
-                                <span className="text-sm flex-shrink-0">✨</span>
-                                <p className="text-xs text-white/50 leading-relaxed italic">{briefing.motivationalNote}</p>
+                                <Sparkles className="w-3.5 h-3.5 flex-shrink-0 text-muted mt-0.5" />
+                                <p className="text-xs text-secondary leading-relaxed italic">{briefing.motivationalNote}</p>
                             </div>
                         )}
                         {briefing.todayGoal && (
-                            <div className="flex gap-2 pt-1 border-t border-white/5">
-                                <span className="text-sm flex-shrink-0">🎯</span>
-                                <p className="text-xs text-white/40 leading-relaxed">
-                                    <strong className="text-white/60">Today's goal:</strong> {briefing.todayGoal}
+                            <div className="flex gap-2 pt-1 border-t border-border">
+                                <Target className="w-3.5 h-3.5 flex-shrink-0 text-muted mt-0.5" />
+                                <p className="text-xs text-muted leading-relaxed">
+                                    <strong className="text-secondary">Today's goal:</strong> {briefing.todayGoal}
                                 </p>
                             </div>
                         )}
@@ -624,7 +627,7 @@ export default function DailyBriefing() {
 
                     {/* Footer */}
                     <div className="flex items-center justify-between pt-1">
-                        <p className="text-[10px] text-white/15">
+                        <p className="text-[10px] text-muted">
                             Generated {new Date(
                                 typeof briefing.generatedAt === 'string'
                                     ? briefing.generatedAt
@@ -634,9 +637,9 @@ export default function DailyBriefing() {
                         <button
                             onClick={handleGenerate}
                             disabled={generating}
-                            className="text-[11px] text-white/20 hover:text-brand-400 transition-colors"
+                            className="flex items-center gap-1 text-[11px] text-muted hover:text-brand-500 transition-colors"
                         >
-                            ↻ Refresh
+                            <RefreshCw className="w-3 h-3" /> Refresh
                         </button>
                     </div>
                 </div>

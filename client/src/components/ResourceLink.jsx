@@ -15,7 +15,7 @@ export default function ResourceLink({ resource, className = 'text-xs' }) {
         href={resource.url}
         target="_blank"
         rel="noreferrer"
-        className={`flex items-center gap-2 text-white/50 hover:text-brand-400 transition-colors ${className}`}
+        className={`flex items-center gap-2 text-secondary hover:text-brand-500 transition-colors ${className}`}
       >
         <span>🔗</span>
         <span className="truncate">{label}</span>
@@ -26,7 +26,7 @@ export default function ResourceLink({ resource, className = 'text-xs' }) {
   return (
     <div
       title="No verified link found for this resource"
-      className={`flex items-center gap-2 text-white/30 cursor-not-allowed ${className}`}
+      className={`flex items-center gap-2 text-muted cursor-not-allowed ${className}`}
     >
       <span>🚫</span>
       <span className="truncate">{label}</span>

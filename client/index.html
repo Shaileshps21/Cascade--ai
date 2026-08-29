@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 
 <head>
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/icon.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#07080f" />
+  <meta name="theme-color" content="#14161a" />
   <meta name="description"
     content="AI-powered productivity companion that proactively saves you from missed deadlines" />
   <title>Cascade — AI Productivity Companion</title>
@@ -15,9 +15,25 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
     rel="stylesheet" />
+  <script>
+    // Resolve + apply the theme before first paint to avoid a flash of the
+    // wrong theme (UPDATED_design.md §4). Mirrors the read/write contract in
+    // ThemeContext.jsx — keep both in sync if the storage key ever changes.
+    (function () {
+      try {
+        var stored = localStorage.getItem('cascade-theme');
+        var theme = stored === 'light' || stored === 'dark'
+          ? stored
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
 </head>
 
-<body class="bg-surface-950 text-white antialiased">
+<body class="bg-base text-primary antialiased">
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
 </body>

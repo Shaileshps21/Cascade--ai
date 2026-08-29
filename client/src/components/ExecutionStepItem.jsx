@@ -3,11 +3,11 @@ import ResourceLink from './ResourceLink.jsx';
 import MarkdownText from './MarkdownText.jsx';
 
 const STATUS_META = {
-  pending: { label: 'Pending', dot: 'bg-white/20', text: 'text-white/40' },
-  in_progress: { label: 'In progress', dot: 'bg-brand-400 animate-pulse', text: 'text-brand-400' },
-  completed: { label: 'Completed', dot: 'bg-emerald-400', text: 'text-emerald-400' },
-  blocked: { label: 'Blocked', dot: 'bg-rose-400', text: 'text-rose-400' },
-  skipped: { label: 'Skipped', dot: 'bg-white/20', text: 'text-white/30' },
+  pending: { label: 'Pending', dot: 'bg-border-strong', text: 'text-secondary' },
+  in_progress: { label: 'In progress', dot: 'bg-brand-400 animate-pulse', text: 'text-brand-500' },
+  completed: { label: 'Completed', dot: 'bg-success', text: 'text-success' },
+  blocked: { label: 'Blocked', dot: 'bg-danger', text: 'text-danger' },
+  skipped: { label: 'Skipped', dot: 'bg-border-strong', text: 'text-muted' },
 };
 
 /**
@@ -48,24 +48,24 @@ export default function ExecutionStepItem({ step, onUpdate }) {
   };
 
   return (
-    <div className={`card overflow-hidden ${step.status === 'blocked' ? 'border-rose-500/25' : ''}`}>
+    <div className={`card overflow-hidden ${step.status === 'blocked' ? 'border-danger/25' : ''}`}>
       <div className="flex items-center gap-3 px-4 py-3">
         {/* Status toggle checkbox */}
         <button
           disabled={busy}
           onClick={() => run({ status: step.status === 'completed' ? 'pending' : 'completed' })}
           title={step.status === 'completed' ? 'Reopen' : 'Mark complete'}
-          className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${step.status === 'completed' ? 'bg-emerald-500 border-emerald-500' : 'border-white/20 hover:border-white/40'
+          className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${step.status === 'completed' ? 'bg-success border-success' : 'border-border-strong hover:border-secondary'
             }`}
         >
           {step.status === 'completed' && <span className="text-white text-[11px] font-bold">✓</span>}
         </button>
 
         <button className="flex-1 min-w-0 text-left" onClick={() => setExpanded((e) => !e)}>
-          <span className={`text-sm ${step.status === 'completed' ? 'text-white/40 line-through' : 'text-white/85'}`}>
+          <span className={`text-sm ${step.status === 'completed' ? 'text-muted line-through' : 'text-primary'}`}>
             {step.title}
           </span>
-          {step.isOptional && <span className="ml-2 text-[10px] text-white/25 border border-white/10 rounded px-1 py-0.5">optional</span>}
+          {step.isOptional && <span className="ml-2 text-[10px] text-muted border border-border rounded px-1 py-0.5">optional</span>}
         </button>
 
         <span className={`text-[11px] font-medium flex-shrink-0 flex items-center gap-1.5 ${meta.text}`}>
@@ -74,27 +74,27 @@ export default function ExecutionStepItem({ step, onUpdate }) {
         </span>
 
         {step.estimatedMinutes != null && (
-          <span className="text-[11px] text-white/30 flex-shrink-0 hidden sm:inline">{step.estimatedMinutes}m</span>
+          <span className="text-[11px] text-muted flex-shrink-0 hidden sm:inline font-mono tabular-nums">{step.estimatedMinutes}m</span>
         )}
 
-        <button onClick={() => setExpanded((e) => !e)} className={`text-white/25 transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`}>
+        <button onClick={() => setExpanded((e) => !e)} className={`text-muted transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`}>
           ›
         </button>
       </div>
 
       {expanded && (
-        <div className="px-4 pb-4 pt-1 border-t border-white/5 space-y-3">
-          {step.description && <p className="text-sm text-white/50 leading-relaxed">{step.description}</p>}
+        <div className="px-4 pb-4 pt-1 border-t border-border space-y-3">
+          {step.description && <p className="text-sm text-secondary leading-relaxed">{step.description}</p>}
 
           {step.status === 'blocked' && step.blockedReason && (
-            <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+            <div className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">
               🚧 {step.blockedReason}
             </div>
           )}
 
           {step.resources?.length > 0 && (
             <div className="space-y-1">
-              <p className="text-[11px] text-white/30 uppercase tracking-wide font-semibold">Resources</p>
+              <p className="text-[11px] text-muted uppercase tracking-wide font-semibold">Resources</p>
               {step.resources.map((r, i) => <ResourceLink key={i} resource={r} />)}
             </div>
           )}
@@ -108,7 +108,7 @@ export default function ExecutionStepItem({ step, onUpdate }) {
             )}
             {step.status === 'in_progress' && (
               <>
-                <button disabled={busy} onClick={() => run({ status: 'pending' })} className="btn-ghost text-xs py-1.5 px-3 border border-white/10">
+                <button disabled={busy} onClick={() => run({ status: 'pending' })} className="btn-ghost text-xs py-1.5 px-3 border border-border">
                   ⏸ Pause
                 </button>
                 <button disabled={busy} onClick={() => run({ status: 'completed' })} className="btn-primary text-xs py-1.5 px-3">
@@ -122,7 +122,7 @@ export default function ExecutionStepItem({ step, onUpdate }) {
               </button>
             )}
             {step.status !== 'blocked' && step.status !== 'completed' && (
-              <button disabled={busy} onClick={handleBlock} className="btn-ghost text-xs py-1.5 px-3 border border-rose-500/20 text-rose-400">
+              <button disabled={busy} onClick={handleBlock} className="btn-ghost text-xs py-1.5 px-3 border border-danger/20 text-danger">
                 🚧 Mark blocked
               </button>
             )}
@@ -136,9 +136,9 @@ export default function ExecutionStepItem({ step, onUpdate }) {
           {/* Notes — markdown supported (suggestions.md #4) */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <p className="text-[11px] text-white/30 uppercase tracking-wide font-semibold">Notes</p>
+              <p className="text-[11px] text-muted uppercase tracking-wide font-semibold">Notes</p>
               {!editingNotes && (
-                <button onClick={() => { setEditingNotes(true); setFocusNotes(true); }} className="text-[11px] text-brand-400 hover:text-brand-300">
+                <button onClick={() => { setEditingNotes(true); setFocusNotes(true); }} className="text-[11px] text-brand-500 hover:text-brand-400">
                   Edit
                 </button>
               )}
@@ -154,7 +154,7 @@ export default function ExecutionStepItem({ step, onUpdate }) {
                 className="input-field text-xs py-2"
               />
             ) : (
-              <MarkdownText text={notes} className="text-xs text-white/60 leading-relaxed" />
+              <MarkdownText text={notes} className="text-xs text-secondary leading-relaxed" />
             )}
           </div>
         </div>

@@ -43,26 +43,21 @@ export default function Login() {
   const anyLoading = loading || switchLoading;
 
   return (
-    <div className="min-h-screen bg-surface-950 flex flex-col items-center justify-center px-4">
-      {/* Background glow */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-brand-600/10 blur-3xl" />
-      </div>
-
+    <div className="min-h-screen bg-base flex flex-col items-center justify-center px-4">
       <div className="relative w-full max-w-md animate-fade-in">
         {/* Logo */}
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-500/10 border border-brand-500/30 mb-4">
             <span className="text-3xl">⚡</span>
           </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Cascade</h1>
-          <p className="mt-2 text-white/50 text-sm">AI-powered deadline companion</p>
+          <h1 className="text-3xl font-bold text-primary tracking-tight">Cascade</h1>
+          <p className="mt-2 text-secondary text-sm">AI-powered deadline companion</p>
         </div>
 
         {/* Feature pills */}
         <div className="flex flex-wrap justify-center gap-2 mb-10">
           {['15 AI Agents', 'RAG Personalization', 'Auto-Scheduler', 'Calendar Sync'].map((f) => (
-            <span key={f} className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-white/60">
+            <span key={f} className="px-3 py-1 rounded-full bg-surface-hover border border-border text-xs text-secondary">
               {f}
             </span>
           ))}
@@ -70,13 +65,13 @@ export default function Login() {
 
         {/* Card */}
         <div className="card p-8">
-          <h2 className="text-xl font-semibold text-white mb-1">Get started</h2>
-          <p className="text-white/40 text-sm mb-6">
+          <h2 className="text-xl font-semibold text-primary mb-1">Get started</h2>
+          <p className="text-muted text-sm mb-6">
             Sign in to let AI agents plan, prioritize, and schedule your tasks before deadlines hit.
           </p>
 
           {error && (
-            <div className="mb-4 px-4 py-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm">
+            <div className="mb-4 px-4 py-3 rounded-lg bg-danger/10 border border-danger/30 text-danger text-sm">
               {error}
             </div>
           )}
@@ -86,7 +81,7 @@ export default function Login() {
             onClick={handleSignIn}
             disabled={anyLoading}
             className="w-full flex items-center justify-center gap-3 bg-white text-gray-900 font-semibold
-                       px-4 py-3 rounded-lg hover:bg-gray-100 transition-all duration-150
+                       border border-gray-300 px-4 py-3 rounded-lg hover:bg-gray-100 transition-all duration-150
                        active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
@@ -110,9 +105,9 @@ export default function Login() {
             onClick={handleSwitchAccount}
             disabled={anyLoading}
             className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
-                       border border-white/10 text-white/50 text-sm
-                       hover:text-white/80 hover:border-white/25 hover:bg-white/5
-                       transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                       border border-border text-secondary text-sm
+                       hover:text-primary hover:border-border-strong hover:bg-surface-hover
+                       transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {switchLoading ? (
               <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -127,7 +122,7 @@ export default function Login() {
             {switchLoading ? 'Opening account picker...' : 'Use a different Google account'}
           </button>
 
-          <p className="mt-4 text-center text-xs text-white/25">
+          <p className="mt-4 text-center text-xs text-muted">
             By signing in you agree to let Cascade manage your tasks.
           </p>
         </div>

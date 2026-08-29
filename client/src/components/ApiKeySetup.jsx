@@ -668,6 +668,7 @@
  */
 
 import { useState } from 'react';
+import { Zap, Sparkles, Lock, Check, X, AlertTriangle } from 'lucide-react';
 import { saveApiKey, deleteApiKey } from '../api/index.js';
 
 // ── Provider definitions — Groq FIRST (preferred) ─────────────────────────────
@@ -682,7 +683,7 @@ function buildProviders(models) {
         {
             id: 'groq',
             name: 'Groq',
-            icon: '⚡',
+            icon: Zap,
             recommended: true,
             color: 'text-violet-400',
             bg: 'bg-violet-500/10',
@@ -698,7 +699,7 @@ function buildProviders(models) {
         {
             id: 'gemini',
             name: 'Google Gemini',
-            icon: '✦',
+            icon: Sparkles,
             recommended: false,
             color: 'text-blue-400',
             bg: 'bg-blue-500/10',
@@ -748,38 +749,38 @@ function KeyForm({ selectedType, setSelectedType, onSaved, onCancel, models, ava
 
     return (
         <div className="space-y-3 mt-3">
-            {/* Provider toggle */}
-            <div className="grid grid-cols-2 gap-2">
-                {providers.map((p) => (
-                    <button
-                        key={p.id}
-                        onClick={() => handleSelectType(p.id)}
-                        className={`relative flex flex-col items-start p-3 rounded-xl border text-left transition-all ${selectedType === p.id
-                            ? `${p.border} ${p.bg}`
-                            : 'border-white/10 bg-white/2 hover:border-white/20'
-                            }`}
-                    >
-                        {p.recommended && (
-                            <span className="absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400 border border-violet-500/30">
-                                RECOMMENDED
-                            </span>
-                        )}
-                        <div className="flex items-center gap-2 mb-1.5">
-                            <span className={`text-base ${p.color}`}>{p.icon}</span>
-                            <span className={`text-sm font-semibold ${selectedType === p.id ? 'text-white' : 'text-white/60'}`}>
-                                {p.name}
-                            </span>
-                        </div>
-                        <span className={`text-[11px] ${p.badgeColor}`}>{p.badge}</span>
-                        <span className="text-[10px] text-white/25 mt-0.5">{p.why}</span>
-                    </button>
-                ))}
+            {/* Provider picker — compact stacked rows, not competing feature cards
+                (UPDATED_design.md §9.8) */}
+            <div className="border border-border rounded-lg divide-y divide-border overflow-hidden">
+                {providers.map((p) => {
+                    const active = selectedType === p.id;
+                    return (
+                        <button
+                            key={p.id}
+                            type="button"
+                            data-active={active}
+                            onClick={() => handleSelectType(p.id)}
+                            className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${active ? 'bg-brand-500/8' : 'bg-surface hover:bg-surface-hover'
+                                }`}
+                        >
+                            <span className={`flex-shrink-0 w-2 h-2 rounded-full border-2 ${active ? 'bg-brand-500 border-brand-500' : 'border-border-strong'}`} />
+                            <p.icon className={`w-4 h-4 flex-shrink-0 ${p.color}`} />
+                            <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-primary flex items-center gap-1.5">
+                                    {p.name}
+                                    {p.recommended && <span className="text-[10px] font-medium text-muted">Recommended</span>}
+                                </p>
+                                <p className="text-[11px] text-muted truncate">{p.badge}</p>
+                            </div>
+                        </button>
+                    );
+                })}
             </div>
 
             {/* Model choice — defaults to the recommended model if left alone */}
             {modelOptions.length > 0 && (
                 <div>
-                    <label className="text-[11px] text-white/30 mb-1 block">Model</label>
+                    <label className="text-[11px] text-muted mb-1 block">Model</label>
                     <select
                         value={selectedModel}
                         onChange={(e) => setSelectedModel(e.target.value)}
@@ -822,7 +823,7 @@ function KeyForm({ selectedType, setSelectedType, onSaved, onCancel, models, ava
             </div>
 
             {error && (
-                <p className="text-xs text-rose-400 px-0.5">{error}</p>
+                <p className="text-xs text-danger px-0.5">{error}</p>
             )}
 
             <div className="flex items-center justify-between">
@@ -830,14 +831,14 @@ function KeyForm({ selectedType, setSelectedType, onSaved, onCancel, models, ava
                     href={provider.link}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-xs text-white/30 hover:text-white/60 underline underline-offset-2"
+                    className="text-xs text-muted hover:text-secondary underline underline-offset-2"
                 >
                     {provider.linkLabel}
                 </a>
                 <div className="flex items-center gap-3">
-                    <span className="text-[11px] text-white/20">🔒 Stored privately</span>
+                    <span className="flex items-center gap-1 text-[11px] text-muted"><Lock className="w-3 h-3" /> Stored privately</span>
                     {onCancel && (
-                        <button onClick={onCancel} className="text-xs text-white/30 hover:text-white/60">
+                        <button onClick={onCancel} className="text-xs text-muted hover:text-secondary">
                             Cancel
                         </button>
                     )}
@@ -871,11 +872,11 @@ export default function ApiKeySetup({ hasKey, keyType: savedKeyType, savedModel,
             <div className={`card p-3 border ${p.border} ${p.bg}`}>
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
-                        <span className={`text-lg ${p.color}`}>{p.icon}</span>
+                        <p.icon className={`w-4 h-4 flex-shrink-0 ${p.color}`} />
                         <div>
-                            <p className="text-xs font-medium text-white">
+                            <p className="text-xs font-medium text-primary">
                                 {p.name} key active
-                                {p.recommended && <span className="ml-1.5 text-[10px] text-violet-400">✓ Recommended</span>}
+                                {p.recommended && <span className="ml-1.5 text-[10px] text-violet-400 inline-flex items-center gap-0.5"><Check className="w-2.5 h-2.5" /> Recommended</span>}
                             </p>
                             <p className={`text-[11px] ${p.badgeColor}`}>{modelBadge} · Private quota</p>
                         </div>
@@ -889,9 +890,9 @@ export default function ApiKeySetup({ hasKey, keyType: savedKeyType, savedModel,
                         </button>
                         <button
                             onClick={handleRemove}
-                            className="btn-ghost text-xs py-1 px-2 text-white/20 hover:text-rose-400"
+                            className="btn-ghost text-xs py-1 px-2 text-muted hover:text-danger"
                         >
-                            ✕
+                            <X className="w-3 h-3" />
                         </button>
                     </div>
                 </div>
@@ -902,14 +903,14 @@ export default function ApiKeySetup({ hasKey, keyType: savedKeyType, savedModel,
     // ── State 2: Quota exceeded — specifically recommend Groq ──────────────────
     if (quotaExceeded && !hasKey && !showForm) {
         return (
-            <div className="card border border-rose-500/40 bg-rose-500/5 overflow-hidden">
+            <div className="card border border-danger/40 bg-danger/5 overflow-hidden">
                 <div className="p-4 space-y-3">
                     {/* Header */}
                     <div className="flex items-start gap-3">
-                        <span className="text-xl flex-shrink-0">⚠️</span>
+                        <AlertTriangle className="w-5 h-5 flex-shrink-0 text-danger" />
                         <div className="flex-1">
-                            <p className="text-sm font-bold text-rose-400">Shared quota reached</p>
-                            <p className="text-xs text-white/50 mt-0.5">
+                            <p className="text-sm font-bold text-danger">Shared quota reached</p>
+                            <p className="text-xs text-secondary mt-0.5">
                                 The free shared limit is used up for now.
                             </p>
                         </div>
@@ -917,12 +918,12 @@ export default function ApiKeySetup({ hasKey, keyType: savedKeyType, savedModel,
 
                     {/* Groq recommendation highlight */}
                     <div className="flex items-start gap-3 p-3 rounded-xl bg-violet-500/10 border border-violet-500/25">
-                        <span className="text-lg">⚡</span>
+                        <Zap className="w-4 h-4 flex-shrink-0 text-violet-400" />
                         <div className="flex-1">
                             <p className="text-sm font-semibold text-violet-300">
                                 We recommend adding a <strong>Groq key</strong>
                             </p>
-                            <p className="text-xs text-white/40 mt-0.5">
+                            <p className="text-xs text-muted mt-0.5">
                                 Free, ultra-fast, takes 30 seconds to set up.
                                 No credit card required.
                             </p>
@@ -953,22 +954,22 @@ export default function ApiKeySetup({ hasKey, keyType: savedKeyType, savedModel,
     // ── State 3: No personal key — using shared Groq quota ────────────────────
     if (!hasKey && !showForm) {
         return (
-            <div className="card p-3 border border-white/5 bg-white/2">
+            <div className="card p-3 border border-border bg-surface">
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
-                        <span className="text-base text-violet-400">⚡</span>
+                        <Zap className="w-4 h-4 text-violet-400" />
                         <div>
-                            <p className="text-xs font-medium text-white/70">
+                            <p className="text-xs font-medium text-secondary">
                                 Using shared {defaultProvider?.keyType === 'gemini' ? 'Gemini' : 'Groq'} quota
                             </p>
-                            <p className="text-[11px] text-white/30">
+                            <p className="text-[11px] text-muted">
                                 Free{defaultProvider?.modelLabel ? ` · ${defaultProvider.modelLabel}` : ''} · No setup needed
                             </p>
                         </div>
                     </div>
                     <button
                         onClick={() => { setSelectedType('groq'); setShowForm(true); }}
-                        className="text-xs text-white/30 hover:text-violet-400 transition-colors border border-white/10 hover:border-violet-500/40 px-2.5 py-1 rounded-lg"
+                        className="text-xs text-muted hover:text-violet-400 transition-colors border border-border hover:border-violet-500/40 px-2.5 py-1 rounded-lg"
                     >
                         Use own key
                     </button>
@@ -982,20 +983,20 @@ export default function ApiKeySetup({ hasKey, keyType: savedKeyType, savedModel,
         <div className="card border border-violet-500/20 bg-violet-500/3 overflow-hidden">
             <div className="p-4">
                 <div className="flex items-center gap-2 mb-1">
-                    <span className="text-base">⚡</span>
-                    <p className="text-sm font-semibold text-white">
+                    <Zap className="w-4 h-4 text-violet-400" />
+                    <p className="text-sm font-semibold text-primary">
                         {hasKey ? 'Change your API key' : 'Add your own API key'}
                     </p>
-                    <p className="text-xs text-white/30 ml-1">— unlimited personal quota</p>
+                    <p className="text-xs text-muted ml-1">— unlimited personal quota</p>
                     <button
                         onClick={() => setShowForm(false)}
-                        className="ml-auto text-xs text-white/25 hover:text-white/60"
+                        className="ml-auto text-xs text-muted hover:text-secondary"
                     >
-                        ✕
+                        <X className="w-3.5 h-3.5" />
                     </button>
                 </div>
-                <p className="text-xs text-white/30 mb-1">
-                    ⚡ Groq is recommended — faster and more generous free tier.
+                <p className="flex items-center gap-1 text-xs text-muted mb-1">
+                    <Zap className="w-3 h-3 flex-shrink-0" /> Groq is recommended — faster and more generous free tier.
                 </p>
 
                 <KeyForm

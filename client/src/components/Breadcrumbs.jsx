@@ -15,15 +15,15 @@ export default function Breadcrumbs({ items }) {
         const isLast = i === items.length - 1;
         return (
           <span key={i} className="flex items-center gap-1.5">
-            {i > 0 && <span className="text-white/20">/</span>}
+            {i > 0 && <span className="text-muted">/</span>}
             {isLast || !item.to ? (
-              <span className={isLast ? 'text-white/80 font-medium truncate max-w-[220px]' : 'text-white/40'}>
+              <span className={isLast ? 'text-secondary font-medium truncate max-w-[220px]' : 'text-muted'}>
                 {item.label}
               </span>
             ) : (
               <Link
                 to={item.to}
-                className="text-white/40 hover:text-brand-400 transition-colors truncate max-w-[220px]"
+                className="text-muted hover:text-brand-500 transition-colors truncate max-w-[220px]"
               >
                 {item.label}
               </Link>

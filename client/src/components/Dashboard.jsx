@@ -1,56 +1,73 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import TaskInput from './TaskInput.jsx';
+import { Zap, AlertTriangle, CircleDot, CheckCircle2, ChevronDown, ChevronUp, Settings } from 'lucide-react';
+import PlanningSurface from './PlanningSurface.jsx';
 import AgentTrace from './AgentTrace.jsx';
 import ProjectCard from './ProjectCard.jsx';
 import CalendarConnect from './CalendarConnect.jsx';
-import SchedulePreferences from './SchedulePreferences.jsx';
-import ResourceModeToggle from './ResourceModeToggle.jsx';
 import ApiKeySetup from './ApiKeySetup.jsx';
 import DailyBriefing from './dailyBriefing.jsx';
 import Onboarding from './Onboarding.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 import { useSSE } from '../hooks/useSSE.js';
 import { getProjects, getApiKeyStatus, getFailedTasks, resumeTask, deleteTask, getOnboardingStatus } from '../api/index.js';
 
 const FILTERS = ['all', 'active', 'at_risk', 'completed', 'overdue'];
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
-function StatCard({ label, value, total, color, bgColor, borderColor, icon, urgent, onClick, active }) {
-  const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+// ── Today Summary — compact inline stat row (UPDATED_design.md §9.5) ──────────
+// Replaces the 4 large bordered StatCards with one flat row: same onClick/
+// active-filter wiring, no per-tile border/ring/donut decoration.
+const STAT_ITEMS = [
+  { key: 'active', label: 'Active', icon: Zap, color: 'text-brand-500' },
+  { key: 'atRisk', label: 'At Risk', icon: AlertTriangle, color: 'text-warning' },
+  { key: 'overdue', label: 'Overdue', icon: CircleDot, color: 'text-danger' },
+  { key: 'done', label: 'Done', icon: CheckCircle2, color: 'text-success' },
+];
+
+function TodaySummary({ stats, filter, onFilter }) {
+  const filterFor = { active: 'active', atRisk: 'at_risk', overdue: 'overdue', done: 'completed' };
   return (
-    <button
-      onClick={onClick}
-      className={`card px-4 py-3 text-left transition-all duration-200 hover:scale-[1.02] active:scale-95
-        ${active ? `${borderColor} ${bgColor}` : 'border-white/5'}
-        ${urgent && value > 0 ? 'ring-1 ring-offset-0 ' + borderColor : ''}`}
-    >
-      <div className="flex items-start justify-between mb-2">
-        <div>
-          <span className="text-lg leading-none">{icon}</span>
-          <p className={`text-2xl font-bold mt-1 tabular-nums ${urgent && value > 0 ? color + ' animate-pulse' : color}`}>
-            {value}
-          </p>
-        </div>
-        {value > 0 && total > 0 && (
-          <div className="relative w-8 h-8">
-            <svg viewBox="0 0 32 32" className="w-8 h-8 -rotate-90">
-              <circle cx="16" cy="16" r="12" fill="none" stroke="currentColor" className="text-white/5" strokeWidth="3" />
-              <circle
-                cx="16" cy="16" r="12" fill="none" stroke="currentColor" className={color} strokeWidth="3"
-                strokeDasharray={`${(pct / 100) * 75.4} 75.4`} strokeLinecap="round"
-                style={{ transition: 'stroke-dasharray 0.6s ease' }}
-              />
-            </svg>
-            <span className={`absolute inset-0 flex items-center justify-center text-[9px] font-bold ${color}`}>{pct}%</span>
-          </div>
-        )}
-      </div>
-      <p className="text-xs text-white/40 font-medium">{label}</p>
-      {value > 0 && total > 0 && (
-        <div className="mt-1.5 h-0.5 rounded-full bg-white/5 overflow-hidden">
-          <div className={`h-full rounded-full transition-all duration-700 ${bgColor.replace('/5', '/60')}`} style={{ width: `${pct}%` }} />
+    <div className="card flex items-stretch divide-x divide-border overflow-hidden">
+      {STAT_ITEMS.map(({ key, label, icon: Icon, color }) => {
+        const value = stats[key];
+        const f = filterFor[key];
+        const active = filter === f;
+        return (
+          <button
+            key={key}
+            onClick={() => onFilter(active ? 'all' : f)}
+            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 transition-colors ${active ? 'bg-brand-500/5' : 'hover:bg-surface-hover'}`}
+          >
+            <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${color}`} />
+            <span className={`text-base font-bold font-mono tabular-nums ${color}`}>{value}</span>
+            <span className="text-xs text-muted font-medium hidden sm:inline">{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── System Status — collapsed by default unless attention is required ────────
+function SystemStatus({ attentionNeeded, ...apiKeyProps }) {
+  const [open, setOpen] = useState(attentionNeeded);
+  return (
+    <div className="space-y-3">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 text-xs font-medium text-muted hover:text-secondary uppercase tracking-wide"
+      >
+        <Settings className="w-3.5 h-3.5" />
+        System Status
+        {attentionNeeded && <span className="w-1.5 h-1.5 rounded-full bg-warning" />}
+        {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+      </button>
+      {open && (
+        <div className="space-y-3">
+          <CalendarConnect />
+          <ApiKeySetup {...apiKeyProps} />
         </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -60,24 +77,24 @@ function UrgencyBanner({ projects, onFilter }) {
   const critical = projects.filter((p) => p.riskLevel === 'high' && p.status !== 'completed');
   if (overdue.length === 0 && critical.length === 0) return null;
   return (
-    <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 px-4 py-3 flex items-center gap-3 flex-wrap">
-      <span className="text-rose-400 text-base animate-pulse">🚨</span>
+    <div className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 flex items-center gap-3 flex-wrap">
+      <span className="text-danger text-base">🚨</span>
       <div className="flex-1 min-w-0">
         {overdue.length > 0 && (
-          <p className="text-sm font-semibold text-rose-400">
+          <p className="text-sm font-semibold text-danger">
             {overdue.length} project{overdue.length > 1 ? 's' : ''} overdue
             {overdue.length <= 2 && ': ' + overdue.map((p) => p.title).join(', ')}
           </p>
         )}
         {critical.length > 0 && (
-          <p className="text-xs text-amber-400 mt-0.5">
+          <p className="text-xs text-warning mt-0.5">
             {critical.length} project{critical.length > 1 ? 's' : ''} at high risk
           </p>
         )}
       </div>
       <button
         onClick={() => onFilter(overdue.length > 0 ? 'overdue' : 'at_risk')}
-        className="text-xs text-white/50 hover:text-white border border-white/10 hover:border-white/20 px-3 py-1.5 rounded-lg transition-all flex-shrink-0"
+        className="text-xs text-secondary hover:text-primary border border-border hover:border-border-strong px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"
       >
         View →
       </button>
@@ -109,16 +126,16 @@ function ResumeBanner({ failedTasks, quotaEvent, onResume, onDelete, resumingId,
   if (allResumable.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 overflow-hidden">
+    <div className="rounded-xl border border-warning/30 bg-warning/5 overflow-hidden">
       <div className="flex items-center gap-3 px-4 py-3">
-        <span className="text-amber-400 text-base">⏸️</span>
+        <span className="text-warning text-base">⏸️</span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-amber-400">
+          <p className="text-sm font-semibold text-warning">
             {allResumable.length === 1
               ? 'Pipeline interrupted — pick up where you left off'
               : `${allResumable.length} interrupted pipelines`}
           </p>
-          <p className="text-xs text-white/40 mt-0.5">
+          <p className="text-xs text-muted mt-0.5">
             {quotaEvent
               ? quotaEvent.isPersonal
                 ? 'Your API key quota was exhausted. Try again after it resets, or wait — work is saved.'
@@ -128,15 +145,15 @@ function ResumeBanner({ failedTasks, quotaEvent, onResume, onDelete, resumingId,
         </div>
       </div>
 
-      <div className="border-t border-white/5 divide-y divide-white/5">
+      <div className="border-t border-border divide-y divide-border">
         {allResumable.map((task) => {
           const isBusy = resumingId === task.taskId || deletingId === task.taskId;
           return (
             <div key={task.taskId} className="flex items-center gap-2 px-4 py-3">
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-white/80 truncate">{task.rawGoal}</p>
-                <p className="text-[11px] text-white/30 mt-0.5">
-                  Stopped at: <span className="text-amber-400/70">{task.pipelineStage}</span>
+                <p className="text-sm text-secondary truncate">{task.rawGoal}</p>
+                <p className="text-[11px] text-muted mt-0.5">
+                  Stopped at: <span className="text-warning">{task.pipelineStage}</span>
                 </p>
               </div>
 
@@ -145,10 +162,10 @@ function ResumeBanner({ failedTasks, quotaEvent, onResume, onDelete, resumingId,
                 id={`resume-btn-${task.taskId}`}
                 onClick={() => onResume(task.taskId)}
                 disabled={!!(resumingId || deletingId)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex-shrink-0
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex-shrink-0
                   ${resumingId === task.taskId
-                    ? 'bg-amber-500/20 text-amber-400 cursor-wait'
-                    : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/30'}`}
+                    ? 'bg-warning/20 text-warning cursor-wait'
+                    : 'bg-warning/15 hover:bg-warning/25 text-warning border border-warning/30'}`}
               >
                 {resumingId === task.taskId ? (
                   <>
@@ -169,10 +186,10 @@ function ResumeBanner({ failedTasks, quotaEvent, onResume, onDelete, resumingId,
                 onClick={() => onDelete(task.taskId)}
                 disabled={isBusy}
                 title="Delete this interrupted task"
-                className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all flex-shrink-0
+                className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors flex-shrink-0
                   ${deletingId === task.taskId
-                    ? 'bg-rose-500/10 text-rose-400/50 cursor-wait'
-                    : 'text-white/25 hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20'}`}
+                    ? 'bg-danger/10 text-danger/50 cursor-wait'
+                    : 'text-muted hover:text-danger hover:bg-danger/10 border border-transparent hover:border-danger/20'}`}
               >
                 {deletingId === task.taskId ? (
                   <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
@@ -199,6 +216,7 @@ function ResumeBanner({ failedTasks, quotaEvent, onResume, onDelete, resumingId,
 // Project Cards. Subtasks, execution steps, resources, notes and schedules
 // all live one click away in the Project Workspace / Task Workspace.
 export default function Dashboard() {
+  const { profile } = useAuth();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeProcessId, setActiveProcessId] = useState(null);
@@ -227,6 +245,10 @@ export default function Dashboard() {
 
   // ── AgentTrace auto-scroll ref ────────────────────────────────────────────
   const traceRef = useRef(null);
+  // ── Project grid ref — clicking a Today Summary stat scrolls here so the
+  // filtered result is actually visible (the grid now sits well below the
+  // fold since the §9.5 reorder moved Stats/Briefing/System Status above it).
+  const projectsRef = useRef(null);
   // Guards the one-shot page scroll: once we've scrolled to the trace panel
   // for this run we must not scroll again (e.g. on a React re-render while
   // isStreaming is still true), otherwise the page keeps jumping back whenever
@@ -330,6 +352,15 @@ export default function Dashboard() {
     setProjects((prev) => prev.filter((p) => p.id !== projectId));
   }, []);
 
+  // Set the filter and scroll the project grid into view so the result of
+  // clicking a Today Summary stat is actually visible on screen.
+  const handleStatFilter = useCallback((f) => {
+    setFilter(f);
+    setTimeout(() => {
+      projectsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }, []);
+
   const handleKeyUpdated = (has, type) => {
     setHasApiKey(has);
     setApiKeyType(type);
@@ -396,24 +427,21 @@ export default function Dashboard() {
   const showResumeBanner = (quotaEvent?.taskId || failedTasks.length > 0);
 
   return (
+    <div className="dashboard-page min-h-screen">
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-5">
 
       {/* First-run onboarding overlay — shown only to new users with zero projects */}
       {showOnboarding && <Onboarding onDone={() => setShowOnboarding(false)} />}
 
-      {/* Stats bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Active" value={stats.active} total={total} color="text-brand-400" bgColor="bg-brand-500/5" borderColor="border-brand-500/30" icon="⚡" urgent={false} onClick={() => setFilter(filter === 'active' ? 'all' : 'active')} active={filter === 'active'} />
-        <StatCard label="At Risk" value={stats.atRisk} total={total} color="text-amber-400" bgColor="bg-amber-500/5" borderColor="border-amber-500/30" icon="⚠️" urgent={stats.atRisk > 0} onClick={() => setFilter(filter === 'at_risk' ? 'all' : 'at_risk')} active={filter === 'at_risk'} />
-        <StatCard label="Overdue" value={stats.overdue} total={total} color="text-rose-400" bgColor="bg-rose-500/5" borderColor="border-rose-500/30" icon="🔴" urgent={stats.overdue > 0} onClick={() => setFilter(filter === 'overdue' ? 'all' : 'overdue')} active={filter === 'overdue'} />
-        <StatCard label="Done" value={stats.done} total={total} color="text-emerald-400" bgColor="bg-emerald-500/5" borderColor="border-emerald-500/30" icon="✅" urgent={false} onClick={() => setFilter(filter === 'completed' ? 'all' : 'completed')} active={filter === 'completed'} />
-      </div>
+      {/* ── 1. Today Summary — compact, not dominant ─────────────────────────── */}
+      <TodaySummary stats={stats} filter={filter} onFilter={handleStatFilter} />
 
-      <UrgencyBanner projects={projects} onFilter={setFilter} />
-
+      {/* ── 2. Today's Focus + Morning Briefing ──────────────────────────────── */}
       <DailyBriefing />
 
-      <ApiKeySetup
+      {/* ── 3. System Status — collapsed unless attention is needed ──────────── */}
+      <SystemStatus
+        attentionNeeded={quotaExceeded || !profile?.calendarConnected}
         hasKey={hasApiKey}
         keyType={apiKeyType}
         savedModel={savedModel}
@@ -424,12 +452,20 @@ export default function Dashboard() {
         onKeyUpdated={handleKeyUpdated}
       />
 
-      <CalendarConnect />
+      {/* ── 4. Plan Composer — the dominant action (UPDATED_design.md §9.5) ──── */}
+      <PlanningSurface onProcessStart={setActiveProcessId} />
 
-      <SchedulePreferences />
+      {/* ── AgentTrace — immediately after the Planning Surface so agents are    */}
+      {/* front-and-center the moment streaming starts. The page auto-scrolls    */}
+      {/* to traceRef when isStreaming becomes true (see the useEffect above).   */}
+      {(events.length > 0 || isStreaming) && (
+        <div ref={traceRef}>
+          <AgentTrace events={events} isStreaming={isStreaming} finalData={finalData} onDone={handleAgentDone} />
+        </div>
+      )}
 
-      {/* Resource mode toggle — controls whether the Knowledge Agent verifies URLs */}
-      <ResourceModeToggle />
+      {/* ── 5. Projects — monitoring, not primary ────────────────────────────── */}
+      <UrgencyBanner projects={projects} onFilter={setFilter} />
 
       {/* Resume banner — shown when quota hit or pre-existing failed tasks exist */}
       {showResumeBanner && (
@@ -443,19 +479,8 @@ export default function Dashboard() {
         />
       )}
 
-      <TaskInput onProcessStart={setActiveProcessId} />
-
-      {/* ── AgentTrace — immediately after TaskInput so agents are front-and-center ── */}
-      {/* Mounted here (above filters + grid) so the user sees it the moment      */}
-      {/* streaming starts. The page auto-scrolls to traceRef when isStreaming     */}
-      {/* becomes true (see the useEffect above).                                  */}
-      {(events.length > 0 || isStreaming) && (
-        <div ref={traceRef}>
-          <AgentTrace events={events} isStreaming={isStreaming} finalData={finalData} onDone={handleAgentDone} />
-        </div>
-      )}
-
       {/* Filters */}
+      <div ref={projectsRef} />
       {total > 0 && (
         <div className="flex items-center gap-1 flex-wrap">
           {FILTERS.map((f) => {
@@ -463,14 +488,14 @@ export default function Dashboard() {
             const hasAlert = (f === 'overdue' && stats.overdue > 0) || (f === 'at_risk' && stats.atRisk > 0);
             return (
               <button key={f} onClick={() => setFilter(f)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-all border flex items-center gap-1 ${filter === f
-                  ? 'border-brand-500 bg-brand-500/20 text-brand-400'
-                  : hasAlert ? 'border-white/20 text-white/50 hover:text-white/70' : 'border-white/10 text-white/30 hover:text-white/60'
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border flex items-center gap-1 ${filter === f
+                  ? 'border-brand-500 bg-brand-500/20 text-brand-500'
+                  : hasAlert ? 'border-border-strong text-secondary hover:text-primary' : 'border-border text-muted hover:text-secondary'
                   }`}
               >
                 {f.replace('_', ' ')}
                 {count > 0 && f !== 'all' && (
-                  <span className={`text-[10px] font-bold px-1 py-0.5 rounded-full ${f === 'overdue' ? 'bg-rose-500/20 text-rose-400' : f === 'at_risk' ? 'bg-amber-500/20 text-amber-400' : 'bg-white/10 text-white/40'}`}>
+                  <span className={`text-[10px] font-bold px-1 py-0.5 rounded-full font-mono ${f === 'overdue' ? 'bg-danger/20 text-danger' : f === 'at_risk' ? 'bg-warning/20 text-warning' : 'bg-surface-hover text-muted'}`}>
                     {count}
                   </span>
                 )}
@@ -483,11 +508,11 @@ export default function Dashboard() {
       {/* Project grid */}
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {[1, 2].map((n) => <div key={n} className="card h-48 animate-pulse bg-surface-800/50" />)}
+          {[1, 2].map((n) => <div key={n} className="card h-48 animate-pulse bg-surface-hover" />)}
         </div>
       ) : filteredProjects.length === 0 ? (
         <div className="card p-10 text-center">
-          <p className="text-white/30 text-sm">
+          <p className="text-muted text-sm">
             {filter === 'all' ? 'No projects yet. Add one above and watch the agents work.' : `No ${filter.replace('_', ' ')} projects.`}
           </p>
         </div>
@@ -504,6 +529,7 @@ export default function Dashboard() {
           ))}
         </div>
       )}
+    </div>
     </div>
   );
 }

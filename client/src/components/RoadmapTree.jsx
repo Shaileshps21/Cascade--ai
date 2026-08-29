@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { GripVertical } from 'lucide-react';
 import { reorderModuleTasks } from '../api/index.js';
 
-const RISK_DOT = { high: 'bg-rose-400', medium: 'bg-amber-400', low: 'bg-emerald-400' };
+const RISK_DOT = { high: 'bg-danger', medium: 'bg-warning', low: 'bg-success' };
 const STATUS_LABEL = { not_started: 'Not started', in_progress: 'In progress', completed: 'Completed' };
-const STATUS_COLOR = { not_started: 'text-white/30', in_progress: 'text-brand-400', completed: 'text-emerald-400' };
+const STATUS_COLOR = { not_started: 'text-muted', in_progress: 'text-brand-500', completed: 'text-success' };
 
 function ProgressBar({ value, className = '' }) {
   return (
-    <div className={`h-1.5 rounded-full bg-white/5 overflow-hidden ${className}`}>
+    <div className={`h-1.5 rounded-full bg-border overflow-hidden ${className}`}>
       <div
-        className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-400 transition-all duration-500"
+        className="h-full rounded-full bg-brand-500 transition-all duration-500"
         style={{ width: `${value}%` }}
       />
     </div>
@@ -30,25 +31,25 @@ function TaskRow({ projectId, task, draggable, isDragging, isDropTarget, onDragS
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
-      className={`flex items-center rounded-lg transition-all ${isDragging ? 'opacity-40' : ''} ${isDropTarget ? 'ring-1 ring-brand-500/50 bg-brand-500/5' : ''}`}
+      className={`flex items-center rounded-lg transition-colors ${isDragging ? 'opacity-40' : ''} ${isDropTarget ? 'ring-1 ring-brand-500/50 bg-brand-500/5' : ''}`}
     >
       {draggable && (
         <span
-          className="cursor-grab active:cursor-grabbing text-white/15 hover:text-white/40 pl-1.5 pr-0.5 flex-shrink-0 select-none"
+          className="cursor-grab active:cursor-grabbing text-muted hover:text-secondary pl-1.5 pr-0.5 flex-shrink-0 select-none"
           title="Drag to reorder within this module"
         >
-          ⠿
+          <GripVertical className="w-3.5 h-3.5" />
         </span>
       )}
       <Link
         to={`/projects/${projectId}/tasks/${task.id}`}
         draggable={false}
-        className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors group flex-1 min-w-0"
+        className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface-hover transition-colors group flex-1 min-w-0"
       >
-        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${task.status === 'completed' ? 'bg-emerald-400' : task.status === 'in_progress' ? 'bg-brand-400 animate-pulse' : 'bg-white/15'}`} />
-        <span className="text-sm text-white/70 group-hover:text-white flex-1 min-w-0 truncate">{task.title}</span>
-        <span className="text-[10px] text-white/30 capitalize hidden sm:inline">{task.difficulty}</span>
-        <span className={`text-[11px] font-medium ${STATUS_COLOR[task.status] || 'text-white/30'}`}>
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${task.status === 'completed' ? 'bg-success' : task.status === 'in_progress' ? 'bg-brand-400 animate-pulse' : 'bg-border-strong'}`} />
+        <span className="text-sm text-secondary group-hover:text-primary flex-1 min-w-0 truncate">{task.title}</span>
+        <span className="text-[10px] text-muted capitalize hidden sm:inline">{task.difficulty}</span>
+        <span className={`text-[11px] font-medium font-mono tabular-nums ${STATUS_COLOR[task.status] || 'text-muted'}`}>
           {task.progress}%
         </span>
       </Link>
@@ -73,19 +74,19 @@ function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks }) {
   };
 
   return (
-    <div className="border border-white/5 rounded-lg overflow-hidden">
+    <div className="border border-border rounded-lg overflow-hidden">
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-3 px-3 py-2.5 bg-surface-900/40 hover:bg-surface-900/70 transition-colors text-left"
+        className="w-full flex items-center gap-3 px-3 py-2.5 bg-base hover:bg-surface-hover transition-colors text-left"
       >
-        <span className={`text-white/30 text-xs transition-transform ${isOpen ? 'rotate-90' : ''}`}>›</span>
-        <span className="text-sm font-medium text-white/80 flex-1 min-w-0 truncate">{module.title}</span>
-        <span className="text-[11px] text-white/40 flex-shrink-0">{module.tasks.length} tasks</span>
+        <span className={`text-muted text-xs transition-transform ${isOpen ? 'rotate-90' : ''}`}>›</span>
+        <span className="text-sm font-medium text-secondary flex-1 min-w-0 truncate">{module.title}</span>
+        <span className="text-[11px] text-muted flex-shrink-0 font-mono tabular-nums">{module.tasks.length} tasks</span>
         <div className="w-16 flex-shrink-0"><ProgressBar value={module.progress} /></div>
-        <span className="text-[11px] font-semibold text-white/50 w-9 text-right flex-shrink-0">{module.progress}%</span>
+        <span className="text-[11px] font-semibold text-secondary w-9 text-right flex-shrink-0 font-mono tabular-nums">{module.progress}%</span>
       </button>
       {isOpen && (
-        <div className="px-2 py-1.5 bg-black/10">
+        <div className="px-2 py-1.5 bg-base">
           {module.tasks.map((task, i) => (
             <TaskRow
               key={task.id}
@@ -122,7 +123,7 @@ export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
   useEffect(() => { setMilestones(milestonesProp); }, [milestonesProp]);
 
   if (!milestones || milestones.length === 0) {
-    return <div className="card p-8 text-center text-sm text-white/30">No roadmap generated yet.</div>;
+    return <div className="card p-8 text-center text-sm text-muted">No roadmap generated yet.</div>;
   }
 
   const handleReorderTasks = async (moduleId, newTaskIds) => {
@@ -147,7 +148,7 @@ export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
   return (
     <div className="space-y-3">
       {reorderError && (
-        <p className="text-xs text-rose-400 px-1">{reorderError}</p>
+        <p className="text-xs text-danger px-1">{reorderError}</p>
       )}
       {milestones.map((milestone) => {
         const isOpen = openMilestone === milestone.id;
@@ -155,25 +156,25 @@ export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
           <div key={milestone.id} className="card overflow-hidden">
             <button
               onClick={() => setOpenMilestone(isOpen ? null : milestone.id)}
-              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left"
+              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-hover transition-colors text-left"
             >
-              <span className={`text-white/40 transition-transform ${isOpen ? 'rotate-90' : ''}`}>›</span>
+              <span className={`text-secondary transition-transform ${isOpen ? 'rotate-90' : ''}`}>›</span>
               <span className={`w-2 h-2 rounded-full flex-shrink-0 ${RISK_DOT[milestone.riskLevel] || RISK_DOT.medium}`} />
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-white truncate">{milestone.title}</p>
+                <p className="font-semibold text-primary truncate">{milestone.title}</p>
                 {milestone.estimatedOutcome && (
-                  <p className="text-xs text-white/35 truncate mt-0.5">{milestone.estimatedOutcome}</p>
+                  <p className="text-xs text-muted truncate mt-0.5">{milestone.estimatedOutcome}</p>
                 )}
               </div>
-              <span className="text-xs text-white/40 flex-shrink-0 hidden sm:inline">{milestone.modules.length} modules</span>
+              <span className="text-xs text-muted flex-shrink-0 hidden sm:inline font-mono tabular-nums">{milestone.modules.length} modules</span>
               <div className="w-20 flex-shrink-0 hidden sm:block"><ProgressBar value={milestone.progress} /></div>
-              <span className="text-sm font-bold text-white/60 w-10 text-right flex-shrink-0">{milestone.progress}%</span>
+              <span className="text-sm font-bold text-secondary w-10 text-right flex-shrink-0 font-mono tabular-nums">{milestone.progress}%</span>
             </button>
 
             {isOpen && (
-              <div className="px-4 pb-4 space-y-2 border-t border-white/5 pt-3">
+              <div className="px-4 pb-4 space-y-2 border-t border-border pt-3">
                 {milestone.description && (
-                  <p className="text-sm text-white/45 leading-relaxed mb-2">{milestone.description}</p>
+                  <p className="text-sm text-muted leading-relaxed mb-2">{milestone.description}</p>
                 )}
                 {milestone.modules.map((module) => (
                   <ModuleBlock

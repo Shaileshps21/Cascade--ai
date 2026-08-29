@@ -7,7 +7,7 @@ const AGENT_META = {
   planning:        { icon: '📝', label: 'Planning',           color: 'text-amber-400',   border: 'border-amber-500/30',    bg: 'bg-amber-500/5'    },
   scheduler:       { icon: '📅', label: 'Scheduler',          color: 'text-emerald-400', border: 'border-emerald-500/30',  bg: 'bg-emerald-500/5'  },
   monitor:         { icon: '👁️', label: 'Monitor',            color: 'text-rose-400',    border: 'border-rose-500/30',     bg: 'bg-rose-500/5'     },
-  system:          { icon: '⚡', label: 'System',             color: 'text-white/60',    border: 'border-white/10',        bg: 'bg-white/3'        },
+  system:          { icon: '⚡', label: 'System',             color: 'text-secondary',   border: 'border-border',          bg: 'bg-surface-hover'  },
   // ── New agents (v3 modular architecture) ──────────────────────────────────
   memory:          { icon: '🧠', label: 'Memory',             color: 'text-indigo-400',  border: 'border-indigo-500/30',   bg: 'bg-indigo-500/5'   },
   knowledge:       { icon: '📚', label: 'Knowledge',          color: 'text-teal-400',    border: 'border-teal-500/30',     bg: 'bg-teal-500/5'     },
@@ -20,9 +20,9 @@ const AGENT_META = {
 };
 
 function StatusDot({ status }) {
-  if (status === 'done') return <span className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />;
-  if (status === 'error') return <span className="w-2 h-2 rounded-full bg-rose-400 flex-shrink-0" />;
-  if (status === 'warning') return <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />;
+  if (status === 'done') return <span className="w-2 h-2 rounded-full bg-success flex-shrink-0" />;
+  if (status === 'error') return <span className="w-2 h-2 rounded-full bg-danger flex-shrink-0" />;
+  if (status === 'warning') return <span className="w-2 h-2 rounded-full bg-warning flex-shrink-0" />;
   return <span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse flex-shrink-0" />;
 }
 
@@ -39,20 +39,20 @@ function AgentEvent({ event }) {
             {meta.label}
           </span>
           {event.ts && (
-            <span className="text-[10px] text-white/20 ml-auto font-mono">
+            <span className="text-[10px] text-muted ml-auto font-mono">
               {new Date(event.ts).toLocaleTimeString()}
             </span>
           )}
         </div>
-        <p className="text-sm text-white/70 leading-relaxed">{event.message}</p>
+        <p className="text-sm text-secondary leading-relaxed">{event.message}</p>
 
         {/* Expanded data if present */}
         {event.data && (
-          <div className="mt-2 p-2 rounded bg-black/20 font-mono text-[11px] text-white/50 overflow-x-auto">
+          <div className="mt-2 p-2 rounded bg-base font-mono text-[11px] text-secondary overflow-x-auto">
             {Object.entries(event.data).map(([k, v]) => (
               <div key={k}>
                 <span className={meta.color}>{k}:</span>{' '}
-                <span className="text-white/70">
+                <span className="text-secondary">
                   {typeof v === 'object' ? JSON.stringify(v).slice(0, 80) : String(v)}
                 </span>
               </div>
@@ -102,34 +102,29 @@ export default function AgentTrace({ events, isStreaming, finalData, onDone }) {
 
   return (
     <div className="card overflow-hidden relative">
-      {/* Animated top-border while streaming — pulses to signal live activity */}
+      {/* Solid accent border while streaming — replaces the old shimmer sweep
+          (UPDATED_design.md §5: decorative motion removed, a static border
+          while a real live state is active is functional, not decorative). */}
       {isStreaming && (
-        <div
-          className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl"
-          style={{
-            background: 'linear-gradient(90deg, transparent, #6366f1, #8b5cf6, #6366f1, transparent)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer 2s linear infinite',
-          }}
-        />
+        <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl bg-brand-500" />
       )}
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
         <div className="flex gap-1.5">
-          <span className="w-3 h-3 rounded-full bg-rose-500/60" />
-          <span className="w-3 h-3 rounded-full bg-amber-500/60" />
-          <span className="w-3 h-3 rounded-full bg-emerald-500/60" />
+          <span className="w-3 h-3 rounded-full bg-danger/60" />
+          <span className="w-3 h-3 rounded-full bg-warning/60" />
+          <span className="w-3 h-3 rounded-full bg-success/60" />
         </div>
-        <span className="font-mono text-xs text-white/40">agent_trace.log</span>
+        <span className="font-mono text-xs text-muted">agent_trace.log</span>
         {isStreaming && (
-          <div className="ml-auto flex items-center gap-2 text-xs text-brand-400">
+          <div className="ml-auto flex items-center gap-2 text-xs text-brand-500">
             <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
             LIVE
           </div>
         )}
         {finalData && (
-          <div className="ml-auto flex items-center gap-2 text-xs text-emerald-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          <div className="ml-auto flex items-center gap-2 text-xs text-success">
+            <span className="w-1.5 h-1.5 rounded-full bg-success" />
             COMPLETE
           </div>
         )}
@@ -142,7 +137,7 @@ export default function AgentTrace({ events, isStreaming, finalData, onDone }) {
         ))}
 
         {isStreaming && (
-          <div className="flex items-center gap-2 px-3 py-2 text-sm text-white/30 font-mono">
+          <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted font-mono">
             <span className="cursor" />
           </div>
         )}
@@ -150,23 +145,23 @@ export default function AgentTrace({ events, isStreaming, finalData, onDone }) {
 
       {/* Summary bar when complete */}
       {finalData && (
-        <div className="border-t border-white/5 px-4 py-3 bg-emerald-500/5">
-          <div className="flex flex-wrap gap-4 text-xs text-white/60">
+        <div className="border-t border-border px-4 py-3 bg-success/5">
+          <div className="flex flex-wrap gap-4 text-xs text-secondary">
             {finalData.priorityScore && (
-              <span>Priority: <strong className="text-white">{finalData.priorityScore}/100</strong></span>
+              <span>Priority: <strong className="text-primary font-mono tabular-nums">{finalData.priorityScore}/100</strong></span>
             )}
             {finalData.riskScore !== undefined && (
-              <span>Risk: <strong className="text-white">{finalData.riskScore}/100</strong></span>
+              <span>Risk: <strong className="text-primary font-mono tabular-nums">{finalData.riskScore}/100</strong></span>
             )}
             {finalData.subtaskCount && (
-              <span>Subtasks: <strong className="text-white">{finalData.subtaskCount}</strong></span>
+              <span>Subtasks: <strong className="text-primary font-mono tabular-nums">{finalData.subtaskCount}</strong></span>
             )}
             {finalData.scheduledCount > 0 && (
-              <span>Calendar: <strong className="text-emerald-400">{finalData.scheduledCount} events added</strong></span>
+              <span>Calendar: <strong className="text-success font-mono tabular-nums">{finalData.scheduledCount} events added</strong></span>
             )}
           </div>
           {finalData.warnings?.length > 0 && (
-            <div className="mt-2 text-xs text-amber-400">
+            <div className="mt-2 text-xs text-warning">
               ⚠️ {finalData.warnings[0]}
             </div>
           )}

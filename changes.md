@@ -13,6 +13,92 @@ rather than left implied.
 
 ---
 
+## 2026-08-29 — Groq default model swap: `llama-3.3-70b-versatile` dismantled → `openai/gpt-oss-120b` ✅
+
+**What.** Groq deprecated/dismantled `llama-3.3-70b-versatile` (the app's `pro`-tier default since the original LLM client was built) — it now 404s as `model_not_found` on every call. `GROQ_MODELS.pro` is now `openai/gpt-oss-120b`, and `qwen/qwen3.6-27b` was added to the user-selectable model list in its place. The user also directly added the newer Gemini 3.x line (`gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite`) to `MODEL_DISPLAY_NAMES`/`GEMINI_SELECTABLE_MODELS`.
+
+**Known trade-off, not an oversight.** `Llm.js`'s own comments previously explained why `gpt-oss-120b` was *avoided* as the default: its free-plan TPM ceiling (~8K) is meaningfully smaller than `llama-3.3-70b-versatile`'s (~12K), and this app's planning/knowledge prompts commonly run 3-6K tokens — over that TPM budget, Groq returns a 413 "Request too large" that isn't retryable. Since the old default is gone regardless, `gpt-oss-120b` was promoted anyway per explicit instruction; if 413s start showing up on the larger prompts in practice, that's this trade-off surfacing, not a new bug.
+
+**Deliberately left unfilled.** `qwen/qwen3.6-27b` and the new `gemini-3.x` models have no entries in `MODEL_LIMITS` or `COST_PER_1K` — their real token ceilings/pricing haven't been confirmed against Groq's/Google's docs yet. Both maps already have safe fallbacks (`modelCeiling()` → 8192, `estimateCost()` → warns and reports $0), so the app functions correctly without them; fabricating numbers here would risk a wrong ceiling silently truncating output. Add real figures once confirmed via `curl https://api.groq.com/openai/v1/models`.
+
+**Files changed:**
+- `server/config/Llm.js` — `GROQ_MODELS.pro`, `GROQ_SELECTABLE_MODELS`, `MODEL_DISPLAY_NAMES`, `MODEL_LIMITS`, `COST_PER_1K`.
+
+**Verified:** backend restarted; startup log confirms `[LLM] Default provider: Groq (openai/gpt-oss-120b)`. No other file in the repo still references `llama-3.3-70b-versatile` (checked via repo-wide grep; the only remaining hits are in a historical comment in `planningAgent_legacy.js`'s dead code and `RAG_CHATBOT_PLAN.md`, neither of which execute).
+
+---
+
+## 2026-08-29 — Dashboard reorder v2, warm-neutral light theme, Planning Parameters polish, stat-filter scroll fix ✅
+
+**What.** Three follow-up refinements to the Dashboard redesign below, made directly from user feedback on the live app:
+1. **Reorder.** Today Summary and Morning Briefing moved above System Status, which moved above the Create Plan surface — final order is Today Summary → Morning Briefing → System Status → Create Plan → Projects.
+2. **Planning Parameters** inside Create Plan now collapses/expands the same way System Status does (collapsed by default, click to expand), styled as a real pressed/active `.segmented-btn` rather than plain text, and its expanded content sits inside a bordered/tinted container with divider lines between the Scheduling/Weekend/Capacity/Resources rows. Each row's label moved back to the left with its buttons on the right (a stacked label-above-buttons layout had been used in the first pass).
+3. **Light theme palette.** Replaced the mismatched light-theme combination (a cream `#f4f2e2` card surface against a cooler blue-gray `#EBEFF0`/`#F5F6F8` page gradient — two different iterations layered from separate earlier requests) with one coherent warm-neutral "paper" palette: `--bg-base`/`--bg-surface`/`--bg-elevated`/`--text-*` all redefined around a single warm-gray family, and `.dashboard-page`'s gradient updated to match.
+
+**Bug, not actually a bug.** The user reported that clicking Active/At Risk/Overdue/Done in the Today Summary stat row "wasn't working." The `onFilter` wiring was correct — the filter state updated exactly as before — but the project grid it filters had moved far below the fold as part of the Dashboard reorder work, so clicking a stat produced no visible on-screen change. Fixed by having the stat click also `scrollIntoView` a ref placed just above the filter chips, not by touching the filter logic itself.
+
+**Files changed:**
+- `client/src/components/Dashboard.jsx` — section reorder; `projectsRef` + `handleStatFilter()` scroll-on-click.
+- `client/src/components/PlanningSurface.jsx` — Planning Parameters made collapsible (`paramsOpen` state), wrapped in a bordered container.
+- `client/src/components/SchedulePreferences.jsx` — rows back to label-left/buttons-right; `border-t` dividers between rows.
+- `client/src/components/ResourceModeToggle.jsx` — row back to label-left/buttons-right.
+- `client/src/index.css` — light-theme token values, `.dashboard-page` gradient.
+
+**Verified:** `npm run build` (client) passes. Live-tested via `claude-in-chrome`: Today Summary → Briefing → System Status → Create Plan order confirmed on screen; Planning Parameters expand/collapse confirmed; clicking "Active" confirmed to filter the grid and scroll it into view; light theme screenshotted and confirmed the new palette renders consistently across the page background, cards, and Planning Parameters container.
+
+---
+
+## 2026-08-29 — UI Redesign Phase 2: Planning Surface, Dashboard hierarchy, compact AI Provider panel, Lucide icons, planning-context metadata ✅
+
+**What.** Implements `UPDATED_design.md` §9 (the structural half of the redesign — §3–§8's token/theme pass had already landed but left the actual page *layouts* untouched, which is what prompted this phase). Every change here is class-name/markup-only per §0's zero-feature-loss constraint — no handler, state, or API-call logic changed in any touched component.
+
+- **Unified Planning Surface (§9.6, §9.7).** New `PlanningSurface.jsx` composes `TaskInput`, `SchedulePreferences`, `ResourceModeToggle` inside one `Create Plan` card instead of three separate floating cards — each child keeps its own state/effects/API calls untouched, only their outer card wrappers were stripped. Segmented controls switched to the `.segmented-btn`/`data-active` classes that already existed in `index.css` but weren't used anywhere. Labels reworded per §9.6's table ("Scheduling style" → "How should Cascade schedule this?", etc. — copy-only).
+- **Dashboard hierarchy (§9.5).** Reordered to Plan Composer → compact Today Summary → Morning Briefing → Projects → collapsible System Status (the last two got reshuffled again the same day — see the entry above). The 4 bordered `StatCard`s were replaced with one flat inline row (`TodaySummary`) — same `onClick`/active-filter wiring, no per-tile border/ring/donut decoration.
+- **Compact AI Provider panel (§9.8).** `ApiKeySetup.jsx`'s Groq/Gemini picker changed from a 2-column grid of large marketing-style cards to a stacked list of compact radio-style rows (dot indicator + name + small muted "Recommended" text + one-line subtitle) — `selectedType`/`handleSave`/etc. unchanged.
+- **Lucide icons (§9.4).** Installed `lucide-react`; replaced UI-chrome emoji with stroke icons across `TaskInput`, `SchedulePreferences`, `ResourceModeToggle`, `CalendarSyncToggle`, `ApiKeySetup`, `dailyBriefing`, `ProjectWorkspace` (tab icons), `RoadmapTree` (drag handle), `ProjectCard`. `Header.jsx`'s hand-rolled Sun/Moon SVGs were left as-is (already stroke-based, no value in reworking a file not otherwise touched). Emoji in Onboarding slides and user-authored content are the documented exceptions and were left alone.
+- **Planning-context metadata (§9.9).** Project Workspace header and Schedule tab now show a one-line "Night · Weekend heavy"-style summary. The data (`workStyle`/`weekendMode`/`availableHoursPerDay`) already existed server-side on each project's `context.preferences` (confirmed via `scheduler_agent`'s `resolveWorkingHours()`) but `contextManager.js`'s `toClientTask()` never surfaced it to the client — fixed with three additive fields on the existing `GET /api/projects/:projectId` response, no new endpoint.
+- **§9.10 numeric-display gaps.** Added `font-mono tabular-nums` to `ExecutionStepItem`'s step time-estimate and `FocusMode`'s "Estimated ~Nmin" caption (the only two genuinely missing spots found during an audit of every `font-mono` usage across the touched components).
+
+**Scoped deviation from the design doc, called out rather than silently applied:** the doc's mock puts the "Activate Plan" button at the very bottom of the merged surface, after the Resources control. Moving it there would require lifting `TaskInput`'s state out of the component — real behavioral risk for a cosmetic reorder — so `TaskInput` still renders start-to-finish as one block (goal → deadline → calendar-sync → Activate) with `SchedulePreferences`/`ResourceModeToggle` following after it in the same card. Net effect (one card, not three) is the same.
+
+**Files changed:**
+- `client/src/components/PlanningSurface.jsx` — **NEW**.
+- `client/src/components/TaskInput.jsx`, `SchedulePreferences.jsx`, `ResourceModeToggle.jsx` — card wrapper stripped, relabeled, icon swap.
+- `client/src/components/Dashboard.jsx` — `TodaySummary`/`SystemStatus` added, section reorder.
+- `client/src/components/ApiKeySetup.jsx` — provider picker restyle, icon swap.
+- `client/src/components/dailyBriefing.jsx`, `CalendarSyncToggle.jsx`, `ProjectCard.jsx`, `RoadmapTree.jsx` — icon swap.
+- `client/src/pages/ProjectWorkspace.jsx` — tab icon swap, planning-context line on header + Schedule tab.
+- `client/src/components/ExecutionStepItem.jsx`, `FocusMode.jsx` — `font-mono tabular-nums` additions.
+- `server/agents/contextManager.js` — `workStyle`/`weekendMode`/`availableHoursPerDay` added to `toClientTask()`.
+- `client/package.json`/`package-lock.json` — `lucide-react` dependency.
+
+**Verified:** `npm run build` (client) passes at every step. Live-tested via `claude-in-chrome` in both themes: Planning Surface renders as one card with the mocked GOAL/PLANNING PARAMETERS layout; compact stat row and System Status collapse/expand; the restyled provider panel renders as stacked rows; opening a project shows the new "Night · Weekend heavy" line on both the header and Schedule tab (and correctly renders nothing when a project has no saved preferences); Roadmap tab confirmed unaffected.
+
+---
+
+## 2026-08-29 — UI Redesign Phase 1: design tokens, light/dark theme, animation cleanup ✅
+
+**What.** Implements `UPDATED_design.md` §3–§8: a token-driven design system replacing the app's previous all-hardcoded-dark-mode styling, plus a user-toggleable light/dark theme (the app had no light theme at all before this — `index.html` hardcoded `class="dark"`). Scope was colors/surfaces/typography/spacing/motion only — no new routes, no behavior changes, per §0's zero-feature-loss constraint.
+
+**How it works.** CSS custom properties defined once in `index.css` (`--bg-base`, `--bg-surface`, `--bg-elevated`, `--border`, `--text-primary/secondary/muted`, `--brand-*`, status colors) and wired through `tailwind.config.js` via `rgb(var(--token) / <alpha-value>)` so existing opacity-modifier syntax keeps working. `darkMode: ['selector', '[data-theme="dark"]']` (Tailwind v3.4+) plus a new `ThemeContext.jsx` (mirrors the existing `AuthContext` pattern) drive an explicit `data-theme` attribute on `<html>`, resolved from `prefers-color-scheme` on first visit and persisted to `localStorage` (`cascade-theme`) — read before first paint via an inline script in `index.html` to avoid a flash of the wrong theme. Every gradient/glow/looping-animation effect across the app (ambient blurred orbs, icon glow-pulses, shimmer sweeps, progress-bar gradients) was removed and replaced with a flat token color or a static equivalent, leaving exactly one approved gradient (`--gradient-brand`) used only on the logo mark and the primary CTA button.
+
+**Bugs found and fixed during the pass (not just re-skinning):**
+- `RiskMeter.jsx` resolved its ring color via `getComputedStyle(...).getPropertyValue('--danger')` in JS — this snapshots the value once and doesn't react to a theme toggle since nothing triggers a re-render. Fixed with `stroke="currentColor"` + a Tailwind `className`, matching the pattern already used elsewhere (e.g. Dashboard's stat donut ring).
+- `ProjectCard.jsx`'s `.card-interactive` class only transitions `border-color`, but the card also does `hover:-translate-y-0.5` — without an override the lift snapped instead of animating. Fixed with an explicit `transition-all duration-200` utility alongside the shared class.
+- `Login.jsx`'s Google sign-in button (`bg-white`, no border) was invisible against the newly-light `.card` background — caught via a live screenshot in light theme, not code review. Fixed with `border border-gray-300`.
+
+**Files changed:**
+- `client/src/index.css`, `client/tailwind.config.js` — token definitions/wiring, shared component classes (`.card`, `.btn-primary`, `.btn-ghost`, `.input-field`, `.segmented-btn`, etc.).
+- `client/index.html` — removed hardcoded `class="dark"`, added no-flash inline theme script.
+- `client/src/context/ThemeContext.jsx` — **NEW**.
+- `client/src/App.jsx`, `client/src/components/Header.jsx` — `ThemeProvider` wiring, theme toggle button.
+- `client/src/components/Dashboard.jsx`, `ProjectCard.jsx`, `Onboarding.jsx`, `AgentTrace.jsx`, `RiskMeter.jsx`, `RoadmapTree.jsx`, `NextBestAction.jsx`, `ResourceLink.jsx`, `Breadcrumbs.jsx`, `CalendarConnect.jsx`, `MarkdownText.jsx` — tokenized, animation/gradient cleanup.
+- `client/src/pages/Login.jsx`, `ManualProjectBuilder.jsx`, `ProjectWorkspace.jsx`, `TaskWorkspace.jsx` — tokenized.
+
+**Verified:** `npm run build` (client) passes. Live-tested via `claude-in-chrome` against the real authenticated app in both themes — Dashboard, ProjectCard, ProjectWorkspace Overview/Roadmap tabs, and the theme toggle itself were exercised and screenshotted; the two bugs above were caught this way, not by reading the diff.
+
+---
+
 ## 2026-08-27 — Task Time Tracker / Focus Timer ✅
 
 **What.** Focus Mode now measures real working time instead of only deriving it from `startedAt`/`completedAt` timestamps. Opening Focus Mode on a not-yet-started step marks it `in_progress` immediately (so `startedAt` reflects when work actually began, and the Task Workspace timeline's "Started" node lights up), and completing from Focus Mode reports the timer's own active seconds — pause time excluded — as `actualMinutes`, with a live comparison against the step's estimate that turns amber once you run over. Implements suggestions.md #5.

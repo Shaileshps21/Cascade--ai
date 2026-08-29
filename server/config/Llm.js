@@ -48,15 +48,19 @@ dotenv.config();
 //      documented context window, and a request over that limit 413s as
 //      "Request too large" — this app's planning/knowledge prompts commonly
 //      run 3-6K tokens, so headroom matters more than raw capability.
-//      Free-plan TPM as of writing: llama-3.3-70b-versatile 12K,
-//      llama-3.1-8b-instant 6K, openai/gpt-oss-120b/20b 8K, groq/compound 70K.
-//      (openai/gpt-oss-120b was tried as `pro` here — technically more
-//      capable, but its 8K TPM cap made the knowledge/planning prompts 413
-//      constantly. llama-3.3-70b-versatile's larger TPM budget makes it the
-//      more reliable default despite being an older model.)
+//
+//   `llama-3.3-70b-versatile` (the previous `pro` default) has been
+//   dismantled/deprecated on Groq and now 404s as model_not_found on every
+//   call — it has been removed everywhere below. `openai/gpt-oss-120b` is
+//   now the `pro` default per explicit instruction, even though it was
+//   previously avoided here for exactly this reason: its free-plan TPM cap
+//   (~8K, vs. the old default's ~12K) can 413 "Request too large" on the
+//   larger knowledge/planning prompts. If that starts happening in practice,
+//   it is not a bug — it's this known trade-off; the fix is either a paid
+//   Groq tier with higher TPM or swapping `pro` back to a higher-TPM model.
 const GROQ_MODELS = {
-    pro: 'llama-3.3-70b-versatile', // best quality — planning, prioritization
-    flash: 'llama-3.1-8b-instant',    // fastest — parsing, quick tasks
+    pro: 'openai/gpt-oss-120b',   // best quality — planning, prioritization
+    flash: 'llama-3.1-8b-instant', // fastest — parsing, quick tasks
 };
 
 const GEMINI_MODELS = {
@@ -73,7 +77,11 @@ const GEMINI_MODELS = {
 const MODEL_LIMITS = {
     'openai/gpt-oss-120b': { maxOutputTokens: 65536, contextWindow: 131072 },
     'openai/gpt-oss-20b': { maxOutputTokens: 65536, contextWindow: 131072 },
-    'llama-3.3-70b-versatile': { maxOutputTokens: 32768, contextWindow: 131072 },
+    // qwen/qwen3.6-27b: limits not yet confirmed against Groq's docs/account —
+    // deliberately omitted so modelCeiling() falls back to the conservative
+    // 8192-token default below rather than risking a fabricated ceiling.
+    // Verify via `curl https://api.groq.com/openai/v1/models` and add real
+    // maxOutputTokens/contextWindow here once confirmed.
     'llama-3.1-8b-instant': { maxOutputTokens: 131072, contextWindow: 131072 },
     'gemini-2.5-pro': { maxOutputTokens: 65536, contextWindow: 1048576 },
     'gemini-2.5-flash': { maxOutputTokens: 65536, contextWindow: 1048576 },
@@ -90,12 +98,14 @@ function modelCeiling(modelName) {
 // getModelLabel()/getProviderSummary() instead of hardcoding a model name, so
 // changing GROQ_MODELS/GEMINI_MODELS above is enough to update the whole app.
 const MODEL_DISPLAY_NAMES = {
-    'openai/gpt-oss-120b': 'GPT-OSS 120B',
-    'openai/gpt-oss-20b': 'GPT-OSS 20B',
-    'llama-3.3-70b-versatile': 'Llama 3.3 70B',
+    'qwen/qwen3.6-27b': 'Qwen3.6 27B',
     'llama-3.1-8b-instant': 'Llama 3.1 8B',
+    'openai/gpt-oss-20b': 'GPT-OSS 20B',
+    'openai/gpt-oss-120b': 'GPT-OSS 120B',
     'gemini-2.5-pro': 'Gemini 2.5 Pro',
-    'gemini-2.5-flash': 'Gemini 2.5 Flash',
+    'gemini-3.7-flash': 'Gemini 3.7 Flash',
+    'gemini-3.6-flash': 'Gemini 3.6 Flash',
+    'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
     'gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
 };
 
@@ -149,14 +159,16 @@ export function getProviderSummary(keyType, modelOverride = null) {
 // model is chat-capable or a sane choice for this app's planning/reasoning
 // workload — e.g. embedding-001, whisper, prompt-guard are excluded).
 const GROQ_SELECTABLE_MODELS = [
-    'llama-3.3-70b-versatile',
+    'qwen/qwen3.6-27b',
+    'llama-3.1-8b-instant',
     'openai/gpt-oss-120b',
     'openai/gpt-oss-20b',
-    'llama-3.1-8b-instant',
 ];
 const GEMINI_SELECTABLE_MODELS = [
     'gemini-2.5-pro',
-    'gemini-2.5-flash',
+    'gemini-3.7-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
     'gemini-2.5-flash-lite',
 ];
 
@@ -182,7 +194,9 @@ const DEFAULT_MAX_TOKENS = { pro: 10240, flash: 5120 };
 const COST_PER_1K = {
     'openai/gpt-oss-120b': { input: 0.00015, output: 0.00060 },
     'openai/gpt-oss-20b': { input: 0.000075, output: 0.00030 },
-    'llama-3.3-70b-versatile': { input: 0.00059, output: 0.00079 },
+    // qwen/qwen3.6-27b: pricing not yet confirmed — omitted deliberately so
+    // estimateCost() logs a warning and reports $0 rather than a fabricated
+    // figure. Add real per-1K rates here once confirmed against Groq's pricing page.
     'llama-3.1-8b-instant': { input: 0.000050, output: 0.000080 },
     'gemini-2.5-pro': { input: 0.00125, output: 0.00500 },
     'gemini-2.5-flash': { input: 0.000075, output: 0.00030 },

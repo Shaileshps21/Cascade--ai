@@ -395,6 +395,13 @@ export function toClientTask(context) {
         // checkpoint flow) this flips true and the manual badge/CTA retire.
         manualMode: context.metadata?.manualMode ?? false,
         hasSchedule: !!context.schedule,
+        // Planning-parameter snapshot used when this project was scheduled
+        // (UPDATED_design.md §9.9 — shown as read-only context on the
+        // Project Workspace header / Schedule tab). Additive only; already
+        // read server-side by scheduler_agent's resolveWorkingHours().
+        workStyle: context.preferences?.workStyle ?? null,
+        weekendMode: context.preferences?.weekendMode ?? null,
+        availableHoursPerDay: context.preferences?.availableHoursPerDay ?? null,
     };
 }
 
