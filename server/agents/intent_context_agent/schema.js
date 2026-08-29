@@ -25,6 +25,17 @@ function validateIntentOutput(data) {
     if (!Array.isArray(data?.preferences)) warnings.push('preferences should be an array');
     if (!isNonEmptyString(data?.scope)) warnings.push('scope should be a non-empty string');
 
+    // workStartHour/workEndHour are optional (null unless the user explicitly
+    // stated a working-hours window for this request) — validate shape only
+    // when present, and never let a malformed pair block the whole intent.
+    const { workStartHour, workEndHour } = data ?? {};
+    if (workStartHour !== null && workStartHour !== undefined) {
+        if (!isNumberInRange(workStartHour, 0, 23)) warnings.push('workStartHour must be an integer 0-23 when set');
+        if (!isNumberInRange(workEndHour, 1, 24) || workEndHour <= workStartHour) {
+            warnings.push('workEndHour must be a valid hour after workStartHour when set');
+        }
+    }
+
     return { valid: errors.length === 0, errors, warnings };
 }
 

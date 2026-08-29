@@ -28,6 +28,7 @@
  * @param {string} [opts.weekendMode]         - 'skip' | 'light' | 'normal' | 'heavy'
  * @param {number} opts.workStartHour
  * @param {number} opts.workEndHour
+ * @param {boolean} [opts.explicitWindowStated] - true when workStartHour/workEndHour came from THIS request's own text (intent_context_agent), not a saved profile default — signals a "plan my day/window" request rather than an open-ended multi-day project
  * @param {Array<{title:string, startTime:string, endTime:string}>} [opts.fixedEvents] - user-stated non-negotiable time blocks (already carved out of the skeleton as busy time — shown here so the LLM understands why those gaps exist)
  * @param {number|null} [opts.maxContinuousFocusMinutes] - user-stated continuous-work limit before a break, if any
  * @param {number|null} [opts.breakMinutes] - break duration paired with maxContinuousFocusMinutes
@@ -46,6 +47,7 @@ export function buildSchedulerPrompt({
     weekendMode = 'skip',
     workStartHour,
     workEndHour,
+    explicitWindowStated = false,
     fixedEvents = [],
     maxContinuousFocusMinutes = null,
     breakMinutes = null,
@@ -98,7 +100,9 @@ ${estimation ? `## Time estimation context (already computed by time_estimation_
 
 **Rule 3 — Buffer reservation**: Reserve buffer time equal to at least ${Math.round(bufferPercent * 100)}% of total scheduled duration. Represent this as explicit \`bufferSlots\` AND/OR tasks with \`isBuffer: true\`.
 
-**Rule 4 — Spread across the full project window, do NOT cram**: This is the rule most commonly violated — read it carefully. Daily workload must never exceed ${dailyAvailableMinutes} minutes/day (ideally at or below 70%, ~${Math.round(dailyAvailableMinutes * 0.7)} minutes/day). The candidate skeleton below was already built to respect this cap by rolling extra work onto later days — preserve that spread. Do NOT pull later tasks earlier just to "fill up" an early day, and do NOT leave the back half of the timeline empty by finishing everything in the first day or two. If there are ${projectDurationDays !== null && projectDurationDays !== undefined ? Math.max(1, Math.round(projectDurationDays)) : 'N'} days until the deadline, a good schedule uses close to all of them — a handful of short sessions per day across the whole window beats a couple of marathon days followed by long idle stretches.
+**Rule 4 — ${explicitWindowStated ? 'Fill the stated working window, do NOT leave it mostly empty' : 'Spread across the full project window, do NOT cram'}**: ${explicitWindowStated
+        ? `The user explicitly stated this ${workStartHour}:00–${workEndHour}:00 working-hours window for this request — that is a real, known capacity, not a conservative guess. Use it: fill each working day with as much of the task list as actually fits inside ${workStartHour}:00–${workEndHour}:00 (respecting fixed events and any continuous-focus/break rule above), rather than spreading a short task list thin across extra days it doesn't need. Only roll work onto a later day when it genuinely does not fit in the current day's stated window.`
+        : `This is the rule most commonly violated — read it carefully. Daily workload must never exceed ${dailyAvailableMinutes} minutes/day (ideally at or below 70%, ~${Math.round(dailyAvailableMinutes * 0.7)} minutes/day). The candidate skeleton below was already built to respect this cap by rolling extra work onto later days — preserve that spread. Do NOT pull later tasks earlier just to "fill up" an early day, and do NOT leave the back half of the timeline empty by finishing everything in the first day or two. If there are ${projectDurationDays !== null && projectDurationDays !== undefined ? Math.max(1, Math.round(projectDurationDays)) : 'N'} days until the deadline, a good schedule uses close to all of them — a handful of short sessions per day across the whole window beats a couple of marathon days followed by long idle stretches.`}
 
 **Rule 5 — Difficulty/order strategy**: Hard tasks earlier, easy tasks later. Preferred macro-ordering where applicable: Learning → Practice → Implementation → Testing → Review. Never place an implementation task before its prerequisite learning task.
 

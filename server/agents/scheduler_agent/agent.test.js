@@ -31,6 +31,7 @@ import {
     WORK_START_HOUR,
     WORK_END_HOUR,
     FIRST_TASK_DELAY_MINUTES,
+    DEFAULT_DAILY_AVAILABLE_MINUTES,
 } from './agent.js';
 
 // ── Fixture builder ────────────────────────────────────────────────────────
@@ -489,6 +490,75 @@ describe('runSchedulerAgent — end-to-end success path (mocked LLM)', () => {
     });
 });
 
+// ═════════════════════════════════════════════════════════════════════════
+// Deterministic-only fast path — explicit working-hours window + a hard
+// constraint the skeleton already fully enforces (fixed events / focus rule)
+// ═════════════════════════════════════════════════════════════════════════
+describe('runSchedulerAgent — deterministic-only fast path (explicit window + fixed events)', () => {
+    test('skips the LLM entirely and packs same-day tasks inside the stated 09:00-18:00 window', async () => {
+        const createdAt = new Date(2026, 6, 16, 8, 0, 0); // 08:00 local
+        const deadline = new Date(2026, 6, 17, 18, 0, 0); // tomorrow evening — comfortably feasible
+        const context = makeContext({
+            createdAt,
+            deadline,
+            tasks: [
+                { taskId: 'T1', title: 'Fix Production API Bug', estimatedMinutes: 60, difficulty: 'high', priority: 'critical', dependencies: [] },
+                { taskId: 'T2', title: 'Review feedback notes', estimatedMinutes: 30, difficulty: 'low', priority: 'medium', dependencies: [] },
+                { taskId: 'T3', title: 'Finalize report', estimatedMinutes: 120, difficulty: 'medium', priority: 'high', dependencies: ['T2'] },
+            ],
+            estimations: [],
+            topologicalOrdering: ['T1', 'T2', 'T3'],
+        });
+        context.intent = {
+            deadline: deadline.toISOString(),
+            workStartHour: 9,
+            workEndHour: 18,
+            fixedEvents: [{
+                title: 'Client Status Call',
+                startTime: new Date(2026, 6, 16, 11, 30, 0).toISOString(),
+                endTime: new Date(2026, 6, 16, 12, 30, 0).toISOString(),
+            }],
+            maxContinuousFocusMinutes: 90,
+            breakMinutes: 15,
+        };
+
+        let proWasCalled = false;
+        const mockClients = {
+            pro: { generateText: async () => { proWasCalled = true; return { text: '{}' }; } },
+            flash: { generateText: async () => ({ text: '{}' }) },
+            embedding: { embed: async () => null },
+        };
+
+        const result = await runSchedulerAgent(context, mockClients, null, null, []);
+
+        assert.equal(proWasCalled, false, 'an explicit window + fixed events/focus rule should be handled deterministically, no LLM call');
+        assert.equal(result.isFeasible, true);
+        // 3 real tasks + however many break slots the 90-min continuous-focus
+        // rule inserted (isBuffer:true) — count those separately.
+        const realTasks = result.scheduledTasks.filter((t) => !t.isBuffer);
+        assert.equal(realTasks.length, 3);
+        assert.ok(result.schedulingScore >= 70, `expected a healthy score, got ${result.schedulingScore}`);
+
+        for (const t of result.scheduledTasks) {
+            if (t.isBuffer) continue;
+            const start = new Date(t.startTime);
+            const end = new Date(t.endTime);
+            assert.ok(start.getHours() >= 9, `${t.taskId} starts before 09:00`);
+            const endFraction = end.getHours() + end.getMinutes() / 60;
+            assert.ok(endFraction <= 18, `${t.taskId} ends after 18:00`);
+        }
+
+        // Must not overlap the fixed client call.
+        const callStart = new Date(2026, 6, 16, 11, 30, 0).getTime();
+        const callEnd = new Date(2026, 6, 16, 12, 30, 0).getTime();
+        for (const t of result.scheduledTasks) {
+            const s = new Date(t.startTime).getTime();
+            const e = new Date(t.endTime).getTime();
+            assert.ok(e <= callStart || s >= callEnd, `${t.taskId} overlaps the fixed client call`);
+        }
+    });
+});
+
 // ── resolveWorkingHours — day-person / night-person preference ─────────────
 describe('resolveWorkingHours', () => {
     test('defaults to the flexible preset when no preferences are set', () => {
@@ -522,6 +592,24 @@ describe('resolveWorkingHours', () => {
         });
         assert.equal(workStartHour, 6);
         assert.equal(workEndHour, 22);
+    });
+
+    test('a working-hours window stated in THIS request (intent) overrides the saved profile preset', () => {
+        const result = resolveWorkingHours({
+            preferences: { workStyle: 'day' }, // saved preset would be 7-19
+            intent: { workStartHour: 9, workEndHour: 18 },
+        });
+        assert.equal(result.workStartHour, 9);
+        assert.equal(result.workEndHour, 18);
+        assert.equal(result.explicitWindowStated, true);
+        // Full stated window, no 2h/day hobby-default haircut.
+        assert.equal(result.dailyAvailableMinutes, 9 * 60);
+    });
+
+    test('no intent-stated window leaves explicitWindowStated false and the default capacity untouched', () => {
+        const result = resolveWorkingHours({});
+        assert.equal(result.explicitWindowStated, false);
+        assert.equal(result.dailyAvailableMinutes, DEFAULT_DAILY_AVAILABLE_MINUTES);
     });
 });
 

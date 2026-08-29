@@ -65,7 +65,15 @@ Extract the following and return as JSON:
 13. breakMinutes: number|null — the break duration the user stated should follow
     maxContinuousFocusMinutes of work (e.g. "then a 15-minute break" → 15).
     Only set this alongside a non-null maxContinuousFocusMinutes; otherwise null.
-14. reasoning: Object with:
+14. workStartHour: number|null — if the user explicitly stated working hours for
+    THIS request (e.g. "working hours: 09:00 to 18:00", "9am-6pm", "office hours"),
+    the start hour as an integer 0-23 (24-hour clock, e.g. 9 for 9am). Otherwise
+    null — do NOT invent one from typical habits; this is only for an hours
+    window the user actually named.
+15. workEndHour: number|null — the matching end hour (0-24, 24 meaning midnight)
+    for the window above, e.g. 18 for "6pm" / "18:00". Only set alongside a
+    non-null workStartHour; otherwise null.
+16. reasoning: Object with:
     - confidence: number 0-1 (how confident you are in this extraction)
     - assumptions: array of strings
     - warnings: array of strings (e.g. ambiguous goal, past deadline)
@@ -91,6 +99,8 @@ Example output structure:
   ],
   "maxContinuousFocusMinutes": 90,
   "breakMinutes": 15,
+  "workStartHour": 9,
+  "workEndHour": 18,
   "reasoning": {
     "confidence": 0.88,
     "assumptions": ["deadline inferred from complexity"],
@@ -100,5 +110,6 @@ Example output structure:
 }
 
 If the goal has no fixed-time commitments or focus/break rule, still include the
-fields with their empty/null defaults ("fixedEvents": [], "maxContinuousFocusMinutes": null, "breakMinutes": null) — never omit them.`;
+fields with their empty/null defaults ("fixedEvents": [], "maxContinuousFocusMinutes": null,
+"breakMinutes": null, "workStartHour": null, "workEndHour": null) — never omit them.`;
 }

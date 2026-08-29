@@ -5,7 +5,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { registerClient } from '../rag/sseManager.js';
 import { orchestrateTask, replanTask, resumeTask } from '../agents/orchestrator.js';
 import { checkSingleTask } from '../agents/progress_tracking_agent/agent.js';
-import { deleteCalendarEvents } from '../agents/google_calendar_agent/agent.js';
+import { deleteCalendarEvents, syncScheduleToCalendar } from '../agents/google_calendar_agent/agent.js';
 import { createContext, fromFirestoreDocument, toFirestoreDocument, toClientTask, toTaskHistoryEntry } from '../agents/contextManager.js';
 
 const router = express.Router();
@@ -109,6 +109,7 @@ router.post('/manual', requireAuth, async (req, res) => {
   const milestoneId = 'M1';
   const planningModules = [];
   const planningTasks = [];
+  const scheduledTasks = [];
   let taskCounter = 0;
 
   for (let mi = 0; mi < cleanModules.length; mi++) {
@@ -133,8 +134,37 @@ router.post('/manual', requireAuth, async (req, res) => {
         if (!isNaN(sd.getTime())) subtaskDeadline = sd.toISOString();
       }
 
+      // Optional per-subtask start time (ManualProjectBuilder's "start time"
+      // field) — when every subtask in the project has one, this becomes the
+      // project's real schedule below (see scheduledTasks.length check),
+      // with no AI scheduling pass needed.
+      let subtaskStartTime = null;
+      if (st.startTime) {
+        const s = new Date(st.startTime);
+        if (!isNaN(s.getTime())) subtaskStartTime = s;
+      }
+
       const stepId = 'S1';
       const subtaskTitle = st.title.trim();
+
+      if (subtaskStartTime) {
+        scheduledTasks.push({
+          taskId: tId,
+          taskName: subtaskTitle,
+          startTime: subtaskStartTime.toISOString(),
+          endTime: new Date(subtaskStartTime.getTime() + estimatedMinutes * 60_000).toISOString(),
+          estimatedDuration: estimatedMinutes,
+          adjustedDuration: estimatedMinutes,
+          adjustmentReason: '',
+          priority,
+          energyLevel: 'medium',
+          isBuffer: false,
+          isReview: false,
+          isDeepWork: false,
+          dependencies: [],
+          confidence: 1,
+        });
+      }
       planningTasks.push({
         taskId: tId,
         milestoneId,
@@ -225,6 +255,44 @@ router.post('/manual', requireAuth, async (req, res) => {
   context.metadata.pipelineStage = 'planning';
   context.metadata.pipelineFailed = false;
   context.metadata.calendarSync = calendarSync !== false;
+
+  // ── User-specified schedule (every subtask got a start time) ─────────────
+  // Only commit this as the project's real `schedule` when EVERY subtask has
+  // one — a partial set would otherwise permanently block the AI scheduler
+  // from ever running for the rest (runSchedulerAgent only runs when
+  // `!context.schedule`), silently leaving those subtasks unscheduled even
+  // after "Let AI enhance". A fully user-timed project has nothing left for
+  // the AI to schedule, so it's safe — and correct — to treat it as done and
+  // sync straight to Google Calendar without waiting for that step.
+  if (scheduledTasks.length > 0 && scheduledTasks.length === planningTasks.length) {
+    context.schedule = {
+      schemaVersion: '1.0.0',
+      scheduledTasks,
+      bufferSlots: [],
+      schedulingScore: 100,
+      confidenceScore: 100,
+      warnings: [],
+      recommendations: [],
+      isFeasible: true,
+      failureConditions: null,
+      reasoning: {
+        confidence: 1,
+        assumptions: ['User specified every subtask\'s start time directly — no AI scheduling was applied.'],
+        warnings: [],
+        promptVersion: 'manual',
+      },
+    };
+
+    if (context.metadata.calendarSync) {
+      try {
+        const syncResult = await syncScheduleToCalendar(context, req.user.uid);
+        context.schedule.scheduledTasks = syncResult.scheduledTasks;
+        context.metadata.calendarConnected = syncResult.calendarConnected;
+      } catch (err) {
+        console.warn('[Tasks POST /manual] Calendar sync skipped:', err.message);
+      }
+    }
+  }
 
   try {
     await db.collection('tasks').doc(taskId).set(toFirestoreDocument(context));

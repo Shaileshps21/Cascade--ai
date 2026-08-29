@@ -73,21 +73,36 @@ export const WORK_STYLE_PRESETS = {
 };
 
 /**
- * Resolve all scheduling preferences from context.preferences:
- *  - workStartHour / workEndHour  (day/flexible/night style)
+ * Resolve all scheduling preferences from context.preferences, with a
+ * per-request override from context.intent when the user explicitly stated a
+ * working-hours window in THIS request's raw text (e.g. "working hours 09:00
+ * to 18:00 tomorrow") — extracted by intent_context_agent as
+ * intent.workStartHour/workEndHour. That's a stronger, more specific signal
+ * than a saved day/night profile preference, which was only ever a fallback
+ * guess for requests that said nothing about hours:
+ *  - workStartHour / workEndHour  (intent override > day/flexible/night style)
  *  - weekendMode                  ('skip' | 'light' | 'normal')
- *  - dailyAvailableMinutes        (from availableHoursPerDay, defaults to 2h)
+ *  - dailyAvailableMinutes        (from the stated window, or availableHoursPerDay, defaults to 2h)
  *
  * Falls back to safe defaults when no preference has been saved.
  * @param {object} context - PlanningContext
- * @returns {{ workStartHour: number, workEndHour: number, workStyle: string, weekendMode: string, dailyAvailableMinutes: number }}
+ * @returns {{ workStartHour: number, workEndHour: number, workStyle: string, weekendMode: string, dailyAvailableMinutes: number, explicitWindowStated: boolean }}
  */
 export function resolveWorkingHours(context) {
     const prefs = context?.preferences ?? {};
+    const intent = context?.intent ?? {};
     const preset = WORK_STYLE_PRESETS[prefs.workStyle] ?? WORK_STYLE_PRESETS.flexible;
 
-    const workStartHour = typeof prefs.workStartHour === 'number' ? prefs.workStartHour : preset.workStartHour;
-    const workEndHour = typeof prefs.workEndHour === 'number' ? prefs.workEndHour : preset.workEndHour;
+    const intentStart = intent.workStartHour;
+    const intentEnd = intent.workEndHour;
+    const explicitWindowStated = typeof intentStart === 'number' && typeof intentEnd === 'number' && intentEnd > intentStart;
+
+    const workStartHour = explicitWindowStated
+        ? intentStart
+        : (typeof prefs.workStartHour === 'number' ? prefs.workStartHour : preset.workStartHour);
+    const workEndHour = explicitWindowStated
+        ? intentEnd
+        : (typeof prefs.workEndHour === 'number' ? prefs.workEndHour : preset.workEndHour);
 
     const weekendMode = WEEKEND_MODES.includes(prefs.weekendMode)
         ? prefs.weekendMode
@@ -96,11 +111,19 @@ export function resolveWorkingHours(context) {
     // availableHoursPerDay set by user in SchedulePreferences (0.5–12h).
     // Clamped to [0.5, 12] in case of stale/bad data. Converts to minutes.
     const rawHours = prefs.availableHoursPerDay;
-    const dailyAvailableMinutes = typeof rawHours === 'number' && rawHours > 0
-        ? Math.round(Math.min(12, Math.max(0.5, rawHours)) * 60)
-        : DEFAULT_DAILY_AVAILABLE_MINUTES;
+    const dailyAvailableMinutes = explicitWindowStated
+        // The user told us their real capacity for this specific window —
+        // use it in full. The conservative 2h/day default below exists only
+        // to keep an AI-*inferred* multi-day project humane when we have no
+        // idea how much time the user actually has; it would otherwise throw
+        // away hours the user explicitly said they have (e.g. a stated
+        // 9-hour working day would be capped at 2 hours of placement/day).
+        ? (workEndHour - workStartHour) * 60
+        : (typeof rawHours === 'number' && rawHours > 0
+            ? Math.round(Math.min(12, Math.max(0.5, rawHours)) * 60)
+            : DEFAULT_DAILY_AVAILABLE_MINUTES);
 
-    return { workStartHour, workEndHour, workStyle: prefs.workStyle ?? 'flexible', weekendMode, dailyAvailableMinutes };
+    return { workStartHour, workEndHour, workStyle: prefs.workStyle ?? 'flexible', weekendMode, dailyAvailableMinutes, explicitWindowStated };
 }
 
 
@@ -715,6 +738,26 @@ export function checkWorkingHoursCompliance(scheduledTasks, workStartHour = WORK
 }
 
 /**
+ * Convert deterministic skeleton entries into full `scheduledTasks` shape by
+ * deriving the two fields only the LLM path would otherwise add:
+ * `energyLevel` and `isDeepWork`, both inferred from `difficulty` using the
+ * same convention documented in the scheduler prompt's "Energy-aware
+ * scheduling" rule. Shared by every place that hands back a schedule without
+ * LLM refinement (deadline-infeasible fallback, unparsable-LLM fallback, and
+ * the deterministic-only fast path for requests with an explicit,
+ * fully-specified working window).
+ * @param {Array<object>} skeleton
+ * @returns {Array<object>}
+ */
+function skeletonToScheduledTasks(skeleton) {
+    return skeleton.map(s => ({
+        ...s,
+        energyLevel: s.difficulty === 'high' || s.difficulty === 'very_high' ? 'high' : (s.difficulty === 'low' ? 'low' : 'medium'),
+        isDeepWork: s.difficulty === 'high' || s.difficulty === 'very_high',
+    }));
+}
+
+/**
  * Build a compact { taskId -> metadata } map fed to the LLM prompt.
  * @param {object} context
  * @returns {Record<string, object>}
@@ -799,9 +842,12 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
         agentFn: async (ctx, llm) => {
             // ── Resolve all scheduling preferences at once ────────────────────
             // resolveWorkingHours now returns workStartHour, workEndHour,
-            // workStyle, weekendMode, and dailyAvailableMinutes — all derived
-            // from context.preferences (saved via SchedulePreferences UI).
-            const { workStartHour, workEndHour, weekendMode, dailyAvailableMinutes } = resolveWorkingHours(ctx);
+            // workStyle, weekendMode, dailyAvailableMinutes, and
+            // explicitWindowStated — derived from context.intent (this
+            // request's stated hours, if any) falling back to
+            // context.preferences (saved via SchedulePreferences UI).
+            const resolved = resolveWorkingHours(ctx);
+            const { workStartHour, workEndHour, weekendMode, dailyAvailableMinutes } = resolved;
 
             // ── Carve out user-declared fixed/non-negotiable time blocks ───────
             // (e.g. "11:30-12:30 client call") alongside real Google Calendar
@@ -822,11 +868,7 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
                 const fallbackSkeleton = buildScheduleSkeleton(ctx, effectiveBusySlots, dailyAvailableMinutes, workStartHour, workEndHour, weekendMode);
                 return {
                     schemaVersion: SCHEMA_VERSION,
-                    scheduledTasks: fallbackSkeleton.map(s => ({
-                        ...s,
-                        energyLevel: s.difficulty === 'high' || s.difficulty === 'very_high' ? 'high' : (s.difficulty === 'low' ? 'low' : 'medium'),
-                        isDeepWork: s.difficulty === 'high' || s.difficulty === 'very_high',
-                    })),
+                    scheduledTasks: skeletonToScheduledTasks(fallbackSkeleton),
                     bufferSlots: [],
                     schedulingScore: 30,
                     confidenceScore: 90,
@@ -843,57 +885,93 @@ export async function runSchedulerAgent(context, clients, eventBus = null, sseEm
                 };
             }
 
-            // ── Build deterministic skeleton + call the LLM for refinement ────
+            // ── Build deterministic skeleton ───────────────────────────────────
             const skeleton = buildScheduleSkeleton(ctx, effectiveBusySlots, dailyAvailableMinutes, workStartHour, workEndHour, weekendMode);
             const taskMeta = buildTaskMeta(ctx);
             const createdAt = new Date(ctx?.metadata?.createdAt ?? Date.now());
             const deadline = ctx?.intent?.deadline ?? ctx?.explicitDeadline ?? null;
+            const fixedEvents = ctx.intent?.fixedEvents ?? [];
+            const maxContinuousFocusMinutes = ctx.intent?.maxContinuousFocusMinutes ?? null;
 
-            const prompt = buildSchedulerPrompt({
-                skeleton,
-                taskMeta,
-                memory: ctx.memory ?? null,
-                estimation: ctx.estimation ?? null,
-                bufferPercent,
-                projectDurationDays,
-                createdAtISO: createdAt.toISOString(),
-                deadlineISO: deadline,
-                dailyAvailableMinutes,
-                weekendMode,
-                workStartHour,
-                workEndHour,
-                fixedEvents: ctx.intent?.fixedEvents ?? [],
-                maxContinuousFocusMinutes: ctx.intent?.maxContinuousFocusMinutes ?? null,
-                breakMinutes: ctx.intent?.breakMinutes ?? null,
-            });
+            // ── Deterministic-only fast path ──────────────────────────────────
+            // When the user stated BOTH a concrete working-hours window AND
+            // another hard constraint the skeleton already fully enforces
+            // (fixed non-negotiable events, or a continuous-focus/break rule),
+            // this is a "plan my day/window precisely" request, not an
+            // open-ended "turn my goal into a project" one. LLM improvisation
+            // is a liability here, not a refinement — the model's only
+            // instruction for workload spread (Rule 4) is tuned for spreading
+            // an AI-*inferred* multi-day project thin, which is exactly wrong
+            // for a single stated window, and every constraint that matters
+            // (working hours, fixed events, focus/break, dependency order,
+            // priority order) is already satisfied by buildScheduleSkeleton.
+            // Skipping the LLM call here also saves two full LLM round-trips
+            // (generateText + parseJSONWithRepair) per run for this common case.
+            const useDeterministicOnly = resolved.explicitWindowStated
+                && (fixedEvents.length > 0 || !!maxContinuousFocusMinutes);
 
-            const result = await llm.pro.generateText(prompt, { promptVersion: PROMPT_VERSION });
-            const text = extractText(result);
             let parsed;
-            try {
-                parsed = await parseJSONWithRepair(text, llm.flash);
-            } catch (err) {
-                console.warn(`[${AGENT_NAME}] LLM output unparsable, using deterministic skeleton fallback: ${err.message?.slice(0, 120)}`);
-                parsed = null;
-            }
-
-            // ── Fallback: if the LLM failed entirely, use the raw skeleton ────
-            if (!parsed || !Array.isArray(parsed.scheduledTasks)) {
+            if (useDeterministicOnly) {
                 parsed = {
                     schemaVersion: SCHEMA_VERSION,
-                    scheduledTasks: skeleton.map(s => ({
-                        ...s,
-                        energyLevel: s.difficulty === 'high' || s.difficulty === 'very_high' ? 'high' : (s.difficulty === 'low' ? 'low' : 'medium'),
-                        isDeepWork: s.difficulty === 'high' || s.difficulty === 'very_high',
-                    })),
+                    scheduledTasks: skeletonToScheduledTasks(skeleton),
                     bufferSlots: [],
-                    schedulingScore: 60,
-                    confidenceScore: 50,
-                    warnings: ['LLM scheduling response was invalid/unparsable — used deterministic fallback skeleton with no LLM refinement.'],
+                    schedulingScore: 92,
+                    confidenceScore: 95,
+                    warnings: [],
                     recommendations: [],
                     isFeasible: true,
                     failureConditions: null,
+                    reasoning: {
+                        confidence: 0.95,
+                        assumptions: [`User stated an explicit ${workStartHour}:00–${workEndHour}:00 working window plus fixed events/focus rules, so the deterministic skeleton was used directly (no LLM refinement) — it already satisfies every stated constraint.`],
+                        warnings: [],
+                        promptVersion: PROMPT_VERSION,
+                    },
                 };
+            } else {
+                const prompt = buildSchedulerPrompt({
+                    skeleton,
+                    taskMeta,
+                    memory: ctx.memory ?? null,
+                    estimation: ctx.estimation ?? null,
+                    bufferPercent,
+                    projectDurationDays,
+                    createdAtISO: createdAt.toISOString(),
+                    deadlineISO: deadline,
+                    dailyAvailableMinutes,
+                    weekendMode,
+                    workStartHour,
+                    workEndHour,
+                    explicitWindowStated: resolved.explicitWindowStated,
+                    fixedEvents,
+                    maxContinuousFocusMinutes,
+                    breakMinutes: ctx.intent?.breakMinutes ?? null,
+                });
+
+                const result = await llm.pro.generateText(prompt, { promptVersion: PROMPT_VERSION });
+                const text = extractText(result);
+                try {
+                    parsed = await parseJSONWithRepair(text, llm.flash);
+                } catch (err) {
+                    console.warn(`[${AGENT_NAME}] LLM output unparsable, using deterministic skeleton fallback: ${err.message?.slice(0, 120)}`);
+                    parsed = null;
+                }
+
+                // ── Fallback: if the LLM failed entirely, use the raw skeleton ──
+                if (!parsed || !Array.isArray(parsed.scheduledTasks)) {
+                    parsed = {
+                        schemaVersion: SCHEMA_VERSION,
+                        scheduledTasks: skeletonToScheduledTasks(skeleton),
+                        bufferSlots: [],
+                        schedulingScore: 60,
+                        confidenceScore: 50,
+                        warnings: ['LLM scheduling response was invalid/unparsable — used deterministic fallback skeleton with no LLM refinement.'],
+                        recommendations: [],
+                        isFeasible: true,
+                        failureConditions: null,
+                    };
+                }
             }
 
             parsed.warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];

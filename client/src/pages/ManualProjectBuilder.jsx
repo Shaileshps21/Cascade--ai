@@ -16,7 +16,7 @@ let uid = 0;
 const nextId = () => `local-${++uid}-${Date.now()}`;
 
 function newSubtask() {
-  return { id: nextId(), title: '', estimatedMinutes: '', priority: 'medium', deadline: '' };
+  return { id: nextId(), title: '', estimatedMinutes: '', priority: 'medium', deadline: '', startTime: '' };
 }
 
 function newModule() {
@@ -48,6 +48,14 @@ export default function ManualProjectBuilder() {
   );
   const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
   const totalSubtasks = modules.reduce((n, m) => n + m.subtasks.length, 0);
+  const scheduledSubtasks = modules.reduce(
+    (n, m) => n + m.subtasks.filter((s) => s.title.trim() && s.startTime).length,
+    0
+  );
+  // Calendar sync fires immediately on save only when every titled subtask
+  // has a start time — a partially-timed project still needs "Let AI
+  // enhance" to fill in the rest before anything can go on the calendar.
+  const allSubtasksScheduled = totalSubtasks > 0 && scheduledSubtasks === totalSubtasks;
 
   const updateModule = (moduleId, patch) => {
     setModules((prev) => prev.map((m) => (m.id === moduleId ? { ...m, ...patch } : m)));
@@ -91,6 +99,7 @@ export default function ManualProjectBuilder() {
             estimatedMinutes: s.estimatedMinutes ? Number(s.estimatedMinutes) : undefined,
             priority: s.priority,
             deadline: s.deadline ? new Date(s.deadline).toISOString() : undefined,
+            startTime: s.startTime ? new Date(s.startTime).toISOString() : undefined,
           })),
       }))
       .filter((m) => m.title && m.subtasks.length > 0);
@@ -156,17 +165,26 @@ export default function ManualProjectBuilder() {
             />
           </div>
           {profile?.calendarConnected && (
-            <label className="flex items-center gap-2 cursor-pointer select-none mt-5">
-              <input
-                type="checkbox"
-                checked={calendarSync}
-                onChange={(e) => setCalendarSync(e.target.checked)}
-                className="w-3.5 h-3.5 rounded accent-brand-500 cursor-pointer"
-              />
-              <span className="text-xs text-muted hover:text-secondary transition-colors">
-                📅 Sync to Google Calendar once scheduled
-              </span>
-            </label>
+            <div className="mt-5">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={calendarSync}
+                  onChange={(e) => setCalendarSync(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-brand-500 cursor-pointer"
+                />
+                <span className="text-xs text-muted hover:text-secondary transition-colors">
+                  📅 Sync to Google Calendar
+                </span>
+              </label>
+              {calendarSync && (
+                <p className="text-[11px] text-muted mt-1 pl-5.5">
+                  {allSubtasksScheduled
+                    ? 'Every subtask has a start time — this will sync to your calendar as soon as you save.'
+                    : `Give every subtask a start time to sync immediately (${scheduledSubtasks}/${totalSubtasks} set) — otherwise sync happens once you "Let AI enhance" this project.`}
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -227,6 +245,13 @@ export default function ManualProjectBuilder() {
                     onChange={(e) => updateSubtask(mod.id, st.id, { deadline: e.target.value })}
                     className="input-field w-36 text-xs py-1.5"
                     title="Subtask deadline (optional)"
+                  />
+                  <input
+                    type="datetime-local"
+                    value={st.startTime}
+                    onChange={(e) => updateSubtask(mod.id, st.id, { startTime: e.target.value })}
+                    className="input-field w-44 text-xs py-1.5"
+                    title="Start time (optional) — set this to place the subtask on your calendar"
                   />
                   {mod.subtasks.length > 1 && (
                     <button
