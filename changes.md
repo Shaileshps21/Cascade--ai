@@ -13,6 +13,38 @@ rather than left implied.
 
 ---
 
+## 2026-08-30 — Project soft-delete (archive) silently did nothing — dotted Firestore keys don't nest under `.set()` ✅
+
+**Trigger.** The user reported the previously-built Project Soft-Delete (Archive) feature wasn't working as intended: deleting a project was supposed to make it disappear from the dashboard forever while keeping the Firestore document for the memory agent, but deleted projects kept reappearing.
+
+**Root cause.** `DELETE /api/tasks/:taskId` wrote the archive flag as:
+```js
+await doc.ref.set({
+  'metadata.archived': true,
+  'metadata.archivedAt': new Date().toISOString(),
+  'metadata.pipelineFailed': false,
+}, { merge: true });
+```
+Firestore's `.update()` treats a dotted string key like `'metadata.archived'` as a nested field path — but `.set(data, { merge: true })` does **not**; it creates a **literal top-level field** named `"metadata.archived"` (with a literal dot in the name), leaving the real nested `metadata.archived` untouched. Every list query in the app (`GET /api/tasks`, `GET /api/projects`, `GET /api/tasks/failed`) checks `doc.data()?.metadata?.archived`, so the flag this write was meant to set was never actually visible to any of them — the document just silently kept showing up everywhere.
+
+Verified against the project's real Firestore instance with a throwaway document before writing any fix, to be certain rather than relying on SDK-behavior memory:
+```js
+await ref.set({ metadata: { existing: 'keepme' } });
+await ref.set({ 'metadata.archived': true }, { merge: true });
+// → { metadata: { existing: 'keepme' }, "metadata.archived": true }   <- bug reproduced
+```
+
+**Fix.** `server/routes/tasks.js`'s `DELETE /:taskId` now mutates the already-loaded `context.metadata` object directly and writes the whole document back via `toFirestoreDocument(context)` — the same safe round-trip pattern `PATCH /calendar-sync` and the orchestrator's `checkpoint()` already use elsewhere in this codebase, which sidesteps the dotted-key pitfall entirely. Re-verified against a real Firestore document (with `dependency`/`estimation`/etc. present, matching `createContext()`'s real shape) that `metadata.archived`/`archivedAt`/`pipelineFailed` now nest correctly and every other field (`rawGoal`, `metadata.calendarSync`) survives the round-trip untouched.
+
+Everything else the original Soft-Delete feature description called for was already correctly in place and didn't need changing: the `GET /` / `GET /failed` archived-exclusion filters, the two composite Firestore indexes in `firestore.indexes.json`, `ProjectCard.jsx`'s "Archive" confirm-dialog/labels, and the Dashboard's optimistic client-side removal on delete (`handleProjectDeleted`) — only the write itself was broken.
+
+**Files changed:**
+- `server/routes/tasks.js` — `DELETE /:taskId` now sets `context.metadata.{archived,archivedAt,pipelineFailed}` and writes via `toFirestoreDocument(context)` instead of a dotted-key `.set(..., {merge:true})`.
+
+**Verified:** full server suite 393/393 passing (unchanged — no route-level test coverage existed for this handler before or after, consistent with the rest of `routes/tasks.js`). Bug reproduced and fix confirmed against the project's real Firestore instance via throwaway documents (created and deleted in a separate `_debug_dotted_set_test` collection, never touching real `tasks` data).
+
+---
+
 ## 2026-08-29 — Quick-Add Subtask; Manual Project Builder date/time UI redesign ✅
 
 **Quick-Add Subtask.** New capability: append a single subtask to an existing module — on an AI-generated *or* manually-built project — without running any agent. For when the user notices a step the plan missed and wants to add it in one line rather than resubmitting or re-enhancing the whole project.

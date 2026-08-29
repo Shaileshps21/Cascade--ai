@@ -600,13 +600,21 @@ router.delete('/:taskId', requireAuth, async (req, res) => {
       }
     }
 
-    // Soft-delete: mark archived, never physically remove the document
-    await doc.ref.set({
-      'metadata.archived': true,
-      'metadata.archivedAt': new Date().toISOString(),
-      // Ensure it won't appear in the /failed banner after archiving
-      'metadata.pipelineFailed': false,
-    }, { merge: true });
+    // Soft-delete: mark archived, never physically remove the document.
+    // NOTE: dotted keys like 'metadata.archived' are NOT parsed as nested
+    // field paths by set() the way they are by update() — passed to
+    // set(..., {merge:true}) they create a literal top-level field named
+    // "metadata.archived" instead of nesting under metadata, so the real
+    // metadata.archived every filter checks never actually gets set. Mutate
+    // the already-loaded `context.metadata` object and write it back via
+    // toFirestoreDocument() (the same safe round-trip PATCH /calendar-sync
+    // and the orchestrator's checkpoint() already use) instead.
+    context.metadata = context.metadata ?? {};
+    context.metadata.archived = true;
+    context.metadata.archivedAt = new Date().toISOString();
+    // Ensure it won't appear in the /failed banner after archiving
+    context.metadata.pipelineFailed = false;
+    await doc.ref.set(toFirestoreDocument(context));
 
     res.json({ success: true });
   } catch {
