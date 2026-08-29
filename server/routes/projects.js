@@ -27,6 +27,7 @@ import {
 } from '../agents/contextManager.js';
 import { computeLiveRiskScore, computeDelayProbability } from '../agents/progress_tracking_agent/agent.js';
 import { applyStepUpdate, ALLOWED_STEP_STATUSES } from '../agents/shared/stepProgress.js';
+import { nextTaskId, buildQuickAddTask } from '../agents/shared/quickAddTask.js';
 
 const router = express.Router();
 
@@ -241,6 +242,65 @@ router.patch('/:projectId/tasks/:taskId/notes', requireAuth, async (req, res) =>
     } catch (err) {
         console.error('[Task Notes PATCH]', err);
         res.status(500).json({ error: 'Failed to update task note' });
+    }
+});
+
+// ── POST /api/projects/:projectId/tasks — Quick-Add Subtask ─────────────────
+// Appends one subtask to an existing module without running any agent — for
+// when the user notices a step the AI (or their own manual plan) missed and
+// wants to add it in one line rather than resubmitting/re-enhancing the whole
+// project. Works identically for AI-generated and manually-built projects,
+// since both store the same Milestones → Modules → Tasks shape.
+// Body: { moduleId, title, estimatedMinutes?, priority? }
+router.post('/:projectId/tasks', requireAuth, async (req, res) => {
+    const { projectId } = req.params;
+    const { moduleId, title, estimatedMinutes, priority } = req.body ?? {};
+
+    if (!moduleId || typeof moduleId !== 'string') {
+        return res.status(400).json({ error: '`moduleId` is required.' });
+    }
+    if (!title?.trim()) {
+        return res.status(400).json({ error: '`title` is required.' });
+    }
+
+    try {
+        const found = await loadOwnedContext(projectId, req.user.uid);
+        if (!found) return res.status(404).json({ error: 'Project not found' });
+        const { doc, context } = found;
+
+        let targetModule = null;
+        let targetMilestoneId = null;
+        for (const milestone of context.planning?.milestones ?? []) {
+            const mod = (milestone.modules ?? []).find((m) => m.id === moduleId);
+            if (mod) { targetModule = mod; targetMilestoneId = milestone.id; break; }
+        }
+        if (!targetModule) return res.status(404).json({ error: 'Module not found' });
+
+        const taskId = nextTaskId(context.planning.tasks);
+        const newTask = buildQuickAddTask({
+            taskId,
+            milestoneId: targetMilestoneId,
+            moduleId,
+            title: title.trim(),
+            estimatedMinutes,
+            priority,
+        });
+
+        context.planning.tasks = [...(context.planning.tasks ?? []), newTask];
+        targetModule.tasks = [...(targetModule.tasks ?? []), taskId];
+
+        context.metadata.updatedAt = new Date().toISOString();
+        await doc.ref.set(toFirestoreDocument(context));
+
+        const flat = toClientTask(context);
+        res.json({
+            success: true,
+            task: flat.subtasks.find((t) => t.id === taskId),
+            project: withHealth(context),
+        });
+    } catch (err) {
+        console.error('[Project Task POST]', err);
+        res.status(500).json({ error: 'Failed to add subtask' });
     }
 });
 
