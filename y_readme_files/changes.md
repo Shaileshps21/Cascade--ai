@@ -13,6 +13,32 @@ rather than left implied.
 
 ---
 
+### 2026-08-31 — Break slots no longer synced to Google Calendar ✅
+
+`syncScheduleToCalendar()` (`server/agents/google_calendar_agent/agent.js`) created a
+Google Calendar event for *every* entry in `context.schedule.scheduledTasks[]`,
+including the "Break" slots the scheduler agent inserts between tasks
+(`isBuffer: true`, generated in `scheduler_agent/agent.js` when the continuous-focus
+limit is hit). Breaks were showing up on the user's real calendar as if they were
+work sessions.
+
+Fix: the `pending` filter in `syncScheduleToCalendar()` now also excludes
+`isBuffer` slots (`!t.isBuffer`), so they never get a `calendarEventId` in the first
+place. They still exist in `context.schedule.scheduledTasks[]` and still block that
+time in the app's own Roadmap/Schedule view and in scheduling for other tasks —
+only the calendar-sync step is skipped. `isReview` slots (review/testing days) are
+unaffected — those are real work sessions and still sync normally.
+
+Project deletion (`DELETE /api/tasks/:taskId`) needed no change: it already sweeps
+every `calendarEventId` present in `scheduledTasks` indiscriminately, so it already
+cleaned up any previously-synced break events, and now simply has nothing to clean
+up for breaks going forward.
+
+Verified: full server test suite (402/402 passing, `google_calendar_agent/agent.test.js`
+10/10 passing) after the change.
+
+---
+
 ## 2026-08-31 — Finish LifeSaver→Cascade rebrand: fix typos and a real badge-label bug introduced mid-rename ✅
 
 **Trigger.** The user renamed the product from LifeSaver to Cascade across the live-code brand strings themselves (calendar event prefixes, the server boot banner, in-app copy) as their own hands-on edit, alongside the fixes below in this same local-testing session. Reviewing that diff before committing surfaced three typos and one real bug introduced by the rename, none of them the user's intent.

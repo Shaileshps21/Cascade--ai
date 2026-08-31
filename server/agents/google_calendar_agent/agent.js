@@ -223,7 +223,10 @@ export async function syncScheduleToCalendar(context, userId) {
     }
 
     const updated = scheduledTasks.map((t) => ({ ...t }));
-    const pending = updated.filter((t) => !t.calendarEventId);
+    // Break/buffer slots are real time blocks in the app's own schedule, but
+    // they aren't meaningful calendar events — skip them so they never get a
+    // calendarEventId (and therefore nothing to insert or later delete).
+    const pending = updated.filter((t) => !t.calendarEventId && !t.isBuffer);
     if (pending.length === 0) {
         return { scheduledTasks: updated, calendarConnected: true, warnings: [] };
     }
