@@ -85,7 +85,7 @@ app.listen(PORT, () => {
   const geminiReady = !!process.env.GEMINI_API_KEY;
 
   console.log(`
-🚀 LifeSaver Server — port ${PORT}
+🚀 Cascade Server — port ${PORT}
 📡 Client: ${process.env.CLIENT_URL}
 ⚡ Groq:   ${groqReady ? '✅ configured (default)' : '❌ not set'}
 ✦  Gemini: ${geminiReady ? '✅ configured (fallback)' : '⚠️  not set'}

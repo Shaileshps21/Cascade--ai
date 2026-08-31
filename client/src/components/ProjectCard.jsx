@@ -32,7 +32,11 @@ export default function ProjectCard({ project, onDeleted, onEnhance, enhancing }
   const deadline = project.deadline ? new Date(project.deadline) : null;
   const overdue = deadline && isPast(deadline) && project.status !== 'completed';
   const [deleting, setDeleting] = useState(false);
-  const isManualUnenhanced = project.manualMode && !project.hasSchedule;
+  // `aiEnhanced`, not `hasSchedule` — a manual project can already have a
+  // schedule (every subtask given its own start time) without the AI
+  // pipeline ever having run. The badge/CTA below track AI involvement, not
+  // schedule presence.
+  const isManualUnenhanced = project.manualMode && !project.aiEnhanced;
 
   // Archive = soft-delete. Confirmation text clarifies data is preserved.
   const handleDelete = async (e) => {

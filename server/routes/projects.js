@@ -27,7 +27,8 @@ import {
 } from '../agents/contextManager.js';
 import { computeLiveRiskScore, computeDelayProbability } from '../agents/progress_tracking_agent/agent.js';
 import { applyStepUpdate, ALLOWED_STEP_STATUSES } from '../agents/shared/stepProgress.js';
-import { nextTaskId, buildQuickAddTask } from '../agents/shared/quickAddTask.js';
+import { nextTaskId, buildQuickAddTask, buildQuickAddScheduleEntry } from '../agents/shared/quickAddTask.js';
+import { syncScheduleToCalendar } from '../agents/google_calendar_agent/agent.js';
 
 const router = express.Router();
 
@@ -92,6 +93,7 @@ router.get('/', requireAuth, async (req, res) => {
                 status: project.status,
                 manualMode: project.manualMode,
                 hasSchedule: project.hasSchedule,
+                aiEnhanced: project.aiEnhanced,
                 calendarSync: context.metadata?.calendarSync !== false,
             };
         });
@@ -250,11 +252,15 @@ router.patch('/:projectId/tasks/:taskId/notes', requireAuth, async (req, res) =>
 // when the user notices a step the AI (or their own manual plan) missed and
 // wants to add it in one line rather than resubmitting/re-enhancing the whole
 // project. Works identically for AI-generated and manually-built projects,
-// since both store the same Milestones → Modules → Tasks shape.
-// Body: { moduleId, title, estimatedMinutes?, priority? }
+// since both store the same Milestones → Modules → Tasks shape. Same field
+// set as the Manual Project Builder's per-subtask form (SubtaskFields.jsx):
+// giving the new subtask its own Start Date + Start Time schedules it (and
+// syncs it to Google Calendar, if connected and enabled) exactly like a
+// fully-timed manual subtask does.
+// Body: { moduleId, title, estimatedMinutes?, priority?, deadline?, startTime? }
 router.post('/:projectId/tasks', requireAuth, async (req, res) => {
     const { projectId } = req.params;
-    const { moduleId, title, estimatedMinutes, priority } = req.body ?? {};
+    const { moduleId, title, estimatedMinutes, priority, deadline, startTime } = req.body ?? {};
 
     if (!moduleId || typeof moduleId !== 'string') {
         return res.status(400).json({ error: '`moduleId` is required.' });
@@ -284,10 +290,55 @@ router.post('/:projectId/tasks', requireAuth, async (req, res) => {
             title: title.trim(),
             estimatedMinutes,
             priority,
+            deadline,
         });
 
         context.planning.tasks = [...(context.planning.tasks ?? []), newTask];
         targetModule.tasks = [...(targetModule.tasks ?? []), taskId];
+
+        // A start time schedules just this one task — appended to the
+        // project's existing schedule if it has one, or creating a minimal
+        // one otherwise (mirrors routes/tasks.js POST /manual's per-subtask
+        // scheduling, at single-task granularity).
+        if (startTime) {
+            const scheduleEntry = buildQuickAddScheduleEntry({
+                taskId,
+                title: newTask.title,
+                estimatedMinutes: newTask.estimatedMinutes,
+                priority: newTask.priority,
+                startTime,
+            });
+            if (scheduleEntry) {
+                context.schedule = context.schedule ?? {
+                    schemaVersion: '1.0.0',
+                    scheduledTasks: [],
+                    bufferSlots: [],
+                    schedulingScore: 100,
+                    confidenceScore: 100,
+                    warnings: [],
+                    recommendations: [],
+                    isFeasible: true,
+                    failureConditions: null,
+                    reasoning: {
+                        confidence: 1,
+                        assumptions: [],
+                        warnings: [],
+                        promptVersion: 'manual',
+                    },
+                };
+                context.schedule.scheduledTasks = [...(context.schedule.scheduledTasks ?? []), scheduleEntry];
+
+                if (context.metadata?.calendarSync !== false) {
+                    try {
+                        const syncResult = await syncScheduleToCalendar(context, req.user.uid);
+                        context.schedule.scheduledTasks = syncResult.scheduledTasks;
+                        context.metadata.calendarConnected = syncResult.calendarConnected;
+                    } catch (err) {
+                        console.warn('[Project Task POST] Calendar sync skipped:', err.message);
+                    }
+                }
+            }
+        }
 
         context.metadata.updatedAt = new Date().toISOString();
         await doc.ref.set(toFirestoreDocument(context));

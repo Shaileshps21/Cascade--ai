@@ -44,14 +44,19 @@ export function nextTaskId(existingTasks = []) {
  * @param {string} opts.title
  * @param {number} [opts.estimatedMinutes] - defaults to 30 when absent/invalid, clamped to a 5-minute floor
  * @param {string} [opts.priority] - defaults to 'medium' when not one of low/medium/high/critical
+ * @param {string} [opts.deadline] - ISO date string ("End Date"), or null when not given
  * @returns {object} a `planning.tasks[]` entry
  */
-export function buildQuickAddTask({ taskId, milestoneId, moduleId, title, estimatedMinutes, priority }) {
+export function buildQuickAddTask({ taskId, milestoneId, moduleId, title, estimatedMinutes, priority, deadline }) {
     const resolvedPriority = PRIORITIES.includes(priority) ? priority : 'medium';
     const parsedMinutes = Number(estimatedMinutes);
     const resolvedMinutes = Number.isFinite(parsedMinutes) && parsedMinutes > 0
         ? Math.max(5, Math.round(parsedMinutes))
         : DEFAULT_ESTIMATED_MINUTES;
+    const parsedDeadline = deadline ? new Date(deadline) : null;
+    const resolvedDeadline = parsedDeadline && !Number.isNaN(parsedDeadline.getTime())
+        ? parsedDeadline.toISOString()
+        : null;
     const stepId = 'S1';
 
     return {
@@ -67,7 +72,7 @@ export function buildQuickAddTask({ taskId, milestoneId, moduleId, title, estima
         reviewRequired: false,
         isBuffer: false,
         isReview: false,
-        deadline: null,
+        deadline: resolvedDeadline,
         overview: '',
         objectives: [],
         // Exactly one execution step, matching normalizeExecutionStep()'s
@@ -100,5 +105,44 @@ export function buildQuickAddTask({ taskId, milestoneId, moduleId, title, estima
         resources: [],
         notes: [],
         progress: { status: 'not_started', completedAt: null, actualMinutes: null },
+    };
+}
+
+/**
+ * Build a `context.schedule.scheduledTasks[]` entry for a quick-added task
+ * that was given its own Start Date + Start Time — same shape
+ * scheduler_agent's `skeletonToScheduledTasks()` produces, so the task shows
+ * up in the Schedule tab and syncs to Google Calendar identically to an
+ * AI-scheduled one. Mirrors the Manual Project Builder's single-subtask
+ * scheduling logic (routes/tasks.js POST /manual), just for one task instead
+ * of a whole project.
+ * @param {object} opts
+ * @param {string} opts.taskId
+ * @param {string} opts.title
+ * @param {number} opts.estimatedMinutes - already-resolved minutes (buildQuickAddTask's output)
+ * @param {string} opts.priority - already-resolved priority (buildQuickAddTask's output)
+ * @param {string} opts.startTime - ISO datetime string
+ * @returns {object|null} a scheduledTasks[] entry, or null if startTime doesn't parse
+ */
+export function buildQuickAddScheduleEntry({ taskId, title, estimatedMinutes, priority, startTime }) {
+    const start = new Date(startTime);
+    if (Number.isNaN(start.getTime())) return null;
+    const end = new Date(start.getTime() + estimatedMinutes * 60_000);
+
+    return {
+        taskId,
+        taskName: title,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        estimatedDuration: estimatedMinutes,
+        adjustedDuration: estimatedMinutes,
+        adjustmentReason: '',
+        priority,
+        difficulty: 'medium',
+        dependencies: [],
+        isBuffer: false,
+        isReview: false,
+        energyLevel: 'medium',
+        isDeepWork: false,
     };
 }

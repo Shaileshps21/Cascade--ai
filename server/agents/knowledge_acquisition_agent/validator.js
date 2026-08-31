@@ -58,7 +58,7 @@ const DEEP_LINK_MIN_DEPTH = 2;
 /** Only this much of a response body is scanned for a not-found <title>. */
 const SOFT_404_SCAN_BYTES = 8192;
 
-const USER_AGENT = 'Mozilla/5.0 (compatible; LifeSaverBot/1.0; +link-check)';
+const USER_AGENT = 'Mozilla/5.0 (compatible; CascadeBot/1.0; +link-check)';
 
 const NOT_FOUND_TITLE_PATTERN =
     /(^|\W)(404|not found|page not found|page does(?:n'?t| not) exist|no longer available|nothing here)(\W|$)/i;

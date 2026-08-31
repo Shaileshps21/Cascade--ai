@@ -5,7 +5,7 @@
  *
  * The scheduler already avoids double-booking against external Google
  * Calendar events (google_calendar_agent.getFreeBusy). It has no equivalent
- * awareness of a user's OTHER LifeSaver projects — two concurrent projects
+ * awareness of a user's OTHER Cascade projects — two concurrent projects
  * could book the exact same slot with no warning. This treats every other
  * active project's already-scheduled tasks as opaque busy blocks, in the
  * same `{start, end}` shape `getFreeBusy` returns, so both feed the same

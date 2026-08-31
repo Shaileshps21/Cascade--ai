@@ -389,12 +389,21 @@ export function toClientTask(context) {
         pipelineVersion: context.metadata.pipelineVersion,
         // Manual Todo Mode (AI-optional fallback — see suggestions.md #26):
         // `manualMode` marks a project created via POST /api/tasks/manual
-        // (bypassed the 15-agent pipeline entirely). `hasSchedule` tells the
-        // client whether an AI schedule has since been generated — once the
-        // user runs "Let AI enhance" (which reuses the existing resume/
-        // checkpoint flow) this flips true and the manual badge/CTA retire.
+        // (bypassed the 15-agent pipeline entirely). `hasSchedule` just tells
+        // the client whether context.schedule exists — a manual project can
+        // get one on its own (every subtask given its own start time) without
+        // AI involvement, so it does NOT imply "AI enhanced". `aiEnhanced` is
+        // the actual signal for that: it only flips true once the pipeline
+        // has run to completion (fresh run, or the manual project's "Let AI
+        // enhance" — same resume/checkpoint flow, see orchestrator.js). The
+        // manual badge/CTA in ProjectCard.jsx key off `aiEnhanced`. Falls back
+        // to `pipelineStage === 'complete'` for projects written before this
+        // field existed — that stage was, and still is, only ever reached by
+        // a completed orchestrator run, so it's an accurate reconstruction of
+        // "AI already touched this" for old documents with no migration needed.
         manualMode: context.metadata?.manualMode ?? false,
         hasSchedule: !!context.schedule,
+        aiEnhanced: context.metadata?.aiEnhanced ?? (context.metadata?.pipelineStage === 'complete'),
         // Planning-parameter snapshot used when this project was scheduled
         // (UPDATED_design.md §9.9 — shown as read-only context on the
         // Project Workspace header / Schedule tab). Additive only; already

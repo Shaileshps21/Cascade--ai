@@ -68,10 +68,10 @@ describe('buildCalendarEventPayload', () => {
         });
     });
 
-    test('always prefixes the summary with the ⚡ [LifeSaver] tag', () => {
+    test('always prefixes the summary with the ⚡ [Cascade] tag', () => {
         for (const label of ['first', 'last', null]) {
             const payload = buildCalendarEventPayload(sampleTask, label, 'Any Title');
-            assert.ok(payload.summary.startsWith('⚡ [LifeSaver]'));
+            assert.ok(payload.summary.startsWith('⚡ [Cascade]'));
         }
     });
 

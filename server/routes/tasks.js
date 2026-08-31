@@ -246,6 +246,12 @@ router.post('/manual', requireAuth, async (req, res) => {
   };
 
   context.metadata.manualMode = true;
+  // Distinct from `hasSchedule`/`context.schedule`: a manual project can get a
+  // schedule the moment the user gives every subtask its own start time (see
+  // below), well before "Let AI enhance" ever runs. `aiEnhanced` is the only
+  // flag that actually means "the AI pipeline has touched this project" — the
+  // "manual" badge and "Let AI enhance this" CTA key off this, not hasSchedule.
+  context.metadata.aiEnhanced = false;
   // Deliberately NOT 'complete': leaving it at the same checkpoint stage the
   // orchestrator itself uses after planning means POST /:taskId/resume (the
   // existing checkpoint-resume machinery, unchanged) already knows how to

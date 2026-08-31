@@ -345,8 +345,21 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { format } from 'date-fns';
 import { Sunrise, Eye, Zap, Siren, Pin, Flame, AlertTriangle, Calendar, CheckCircle2, Lightbulb, Sparkles, Target, ChevronUp, ChevronDown, X, RefreshCw } from 'lucide-react';
 import { getTodaysBriefing, generateBriefing, markBriefingSeen, dismissBriefing } from '../api/index.js';
+
+// Format an ISO instant as 24h "HH:mm" in the VIEWER's own timezone — same
+// token ProjectWorkspace.jsx's Schedule tab already uses for
+// `scheduledStart`, so a task's time in the briefing always matches its time
+// in the Roadmap/Schedule tab. The server sends `startISO`/`endISO` (real
+// instants) precisely so this can happen client-side instead of being baked
+// into a fixed-zone string server can't know the viewer's offset for.
+function formatLocalTime(iso, fallback) {
+  if (!iso) return fallback ?? '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? (fallback ?? '') : format(d, 'HH:mm');
+}
 
 const URGENCY_STYLES = {
     calm: {
@@ -383,8 +396,8 @@ function FocusBlock({ block, index }) {
     return (
         <div className={`flex items-start gap-3 p-3 rounded-xl border ${colors}`}>
             <div className="flex-shrink-0 text-center min-w-[52px] font-mono tabular-nums">
-                <p className="text-xs font-bold text-current">{block.time}</p>
-                <p className="text-[10px] text-current/60">{block.endTime}</p>
+                <p className="text-xs font-bold text-current">{formatLocalTime(block.startISO, block.time)}</p>
+                <p className="text-[10px] text-current/60">{formatLocalTime(block.endISO, block.endTime)}</p>
             </div>
             <div className="w-px self-stretch bg-current/20 flex-shrink-0" />
             <div className="flex-1 min-w-0">
@@ -628,11 +641,11 @@ export default function DailyBriefing() {
                     {/* Footer */}
                     <div className="flex items-center justify-between pt-1">
                         <p className="text-[10px] text-muted">
-                            Generated {new Date(
+                            Generated {formatLocalTime(
                                 typeof briefing.generatedAt === 'string'
                                     ? briefing.generatedAt
-                                    : briefing.generatedAt?.seconds * 1000
-                            ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    : new Date(briefing.generatedAt?.seconds * 1000).toISOString()
+                            )}
                         </p>
                         <button
                             onClick={handleGenerate}

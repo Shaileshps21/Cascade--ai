@@ -128,7 +128,7 @@ router.get('/events', requireAuth, async (req, res) => {
       title: e.summary,
       start: e.start?.dateTime || e.start?.date,
       end: e.end?.dateTime || e.end?.date,
-      isLifeSaver: e.summary?.startsWith('⚡ [LifeSaver]'),
+      isCascade: e.summary?.startsWith('⚡ [Cascade]'),
     }));
 
     res.json({ events });

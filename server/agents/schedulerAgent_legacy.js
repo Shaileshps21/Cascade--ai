@@ -109,7 +109,7 @@
 //     : 'Stay focused and make meaningful progress.';
 
 //   const requestBody = {
-//     summary: `⚡ [LifeSaver] ${subtask.title}`,
+//     summary: `⚡ [Cascade] ${subtask.title}`,
 //     description: [
 //       `📌 Part of: "${taskTitle}"`,
 //       '',
@@ -454,7 +454,7 @@
 //     : 'Stay focused and make meaningful progress.';
 
 //   const requestBody = {
-//     summary: `⚡ [LifeSaver] ${subtask.title}`,
+//     summary: `⚡ [Cascade] ${subtask.title}`,
 //     description: [
 //       `📌 Part of: "${taskTitle}"`,
 //       '',
@@ -828,7 +828,7 @@
 //   const labelEmoji = label === 'first' ? '🚀 START' : '🏁 FINAL';
 
 //   const requestBody = {
-//     summary: `⚡ [LifeSaver] ${subtask.title}`,
+//     summary: `⚡ [Cascade] ${subtask.title}`,
 //     description: [
 //       `${labelEmoji} — Part of: "${taskTitle}"`,
 //       '',
@@ -1212,7 +1212,7 @@ async function createCalendarEvent(calendar, subtask, start, end, taskTitle, lab
     : 'Stay focused.';
 
   const requestBody = {
-    summary: `⚡ [LifeSaver] ${label === 'first' ? '🚀' : '🏁'} ${subtask.title}`,
+    summary: `⚡ [Cascade] ${label === 'first' ? '🚀' : '🏁'} ${subtask.title}`,
     description: [
       `${label === 'first' ? '🚀 START BLOCK' : '🏁 FINAL BLOCK'} — Part of: "${taskTitle}"`,
       '',

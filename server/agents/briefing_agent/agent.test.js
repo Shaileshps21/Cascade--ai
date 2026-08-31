@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
     isProjectActive,
+    isBriefableDoc,
     triageProjects,
     classifyUrgencyLevel,
     buildTodaysSchedule,
@@ -70,6 +71,32 @@ test('isProjectActive: false when planning.tasks is empty or missing', () => {
     assert.equal(isProjectActive(makeContext({ planning: { tasks: [] } })), false);
     assert.equal(isProjectActive(makeContext({ planning: null })), false);
     assert.equal(isProjectActive({}), false);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// isBriefableDoc — excludes archived (soft-deleted) and pipeline-failed docs
+// from the briefing, matching the same filter GET /api/projects already uses.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function fakeDoc(metadata) {
+    return { data: () => ({ metadata }) };
+}
+
+test('isBriefableDoc: true for a normal, non-archived, non-failed doc', () => {
+    assert.equal(isBriefableDoc(fakeDoc({})), true);
+    assert.equal(isBriefableDoc(fakeDoc({ archived: false, pipelineFailed: false })), true);
+});
+
+test('isBriefableDoc: false for an archived (soft-deleted) project', () => {
+    assert.equal(isBriefableDoc(fakeDoc({ archived: true })), false);
+});
+
+test('isBriefableDoc: false for a partial pipeline-failed checkpoint', () => {
+    assert.equal(isBriefableDoc(fakeDoc({ pipelineFailed: true })), false);
+});
+
+test('isBriefableDoc: false when both flags are set', () => {
+    assert.equal(isBriefableDoc(fakeDoc({ archived: true, pipelineFailed: true })), false);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -311,19 +338,31 @@ const SCHEDULE_FIXTURE = [
 test('pickTodaysFocusBlock: returns the currently active block when "now" falls inside it', () => {
     const now = new Date('2026-07-16T11:00:00.000Z'); // inside the 10:30-11:30 block
     const result = pickTodaysFocusBlock(SCHEDULE_FIXTURE, now);
-    assert.deepEqual(result, { time: '10:30', task: 'Currently active task', duration: 60 });
+    // startISO/endISO are additive — the client formats these in the
+    // viewer's own local timezone instead of trusting the UTC-baked `time`
+    // string, so the client and Schedule tab never disagree on a task's time.
+    assert.deepEqual(result, {
+        time: '10:30', task: 'Currently active task', duration: 60,
+        startISO: '2026-07-16T10:30:00.000Z', endISO: '2026-07-16T11:30:00.000Z',
+    });
 });
 
 test('pickTodaysFocusBlock: returns the next upcoming block when "now" is before all blocks', () => {
     const now = new Date('2026-07-16T08:00:00.000Z');
     const result = pickTodaysFocusBlock(SCHEDULE_FIXTURE, now);
-    assert.deepEqual(result, { time: '09:00', task: 'Morning task', duration: 30 });
+    assert.deepEqual(result, {
+        time: '09:00', task: 'Morning task', duration: 30,
+        startISO: '2026-07-16T09:00:00.000Z', endISO: '2026-07-16T09:30:00.000Z',
+    });
 });
 
 test('pickTodaysFocusBlock: skips past blocks and returns the next upcoming one', () => {
     const now = new Date('2026-07-16T12:00:00.000Z'); // after morning + active blocks, before afternoon
     const result = pickTodaysFocusBlock(SCHEDULE_FIXTURE, now);
-    assert.deepEqual(result, { time: '14:00', task: 'Afternoon task', duration: 60 });
+    assert.deepEqual(result, {
+        time: '14:00', task: 'Afternoon task', duration: 60,
+        startISO: '2026-07-16T14:00:00.000Z', endISO: '2026-07-16T15:00:00.000Z',
+    });
 });
 
 test('pickTodaysFocusBlock: returns null when all blocks are in the past', () => {

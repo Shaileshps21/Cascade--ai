@@ -29,7 +29,7 @@ import './schema.js'; // registers schema (documentation/validation aid)
 // Everything else       → default calendar color (no colorId), single 15min reminder
 export const FIRST_TASK_COLOR_ID = '9';
 export const LAST_TASK_COLOR_ID = '11';
-export const CALENDAR_EVENT_PREFIX = '⚡ [LifeSaver]';
+export const CALENDAR_EVENT_PREFIX = '⚡ [Cascade]';
 
 // ═════════════════════════════════════════════════════════════════════════
 // Pure helpers (no network — unit-tested in agent.test.js)

@@ -286,7 +286,7 @@
 //     };
 
 //     const handleRemove = async () => {
-//         if (!window.confirm('Remove your API key? You\'ll need to add one again to use LifeSaver.')) return;
+//         if (!window.confirm('Remove your API key? You\'ll need to add one again to use Cascade.')) return;
 //         await deleteApiKey();
 //         onKeyUpdated?.(false, null);
 //     };

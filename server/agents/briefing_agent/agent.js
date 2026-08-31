@@ -43,7 +43,7 @@
  *   {
  *     greeting, headline,
  *     urgencyLevel: 'low'|'medium'|'high'|'critical',
- *     todayFocusBlock: { time, task, duration } | null,
+ *     todayFocusBlock: { time, task, duration, startISO, endISO } | null,
  *     riskAlerts: string[],
  *     insights: string[],
  *     motivationText,
@@ -366,7 +366,13 @@ export function pickTodaysFocusBlock(schedule, now = new Date()) {
     const chosen = active ?? parsed.find((s) => s._start > now) ?? null;
     if (!chosen) return null;
 
-    return { time: chosen.time, task: chosen.subtask, duration: chosen.duration };
+    // `startISO`/`endISO` are additive to the documented `{ time, task,
+    // duration }` schema — `time` is a UTC-formatted string and, on its own,
+    // does not match what the client renders elsewhere for the same instant
+    // (Project Workspace's Schedule tab formats `scheduledStart` in the
+    // viewer's LOCAL timezone). The client should format `startISO` locally
+    // instead of displaying `time` verbatim; kept for any caller still using it.
+    return { time: chosen.time, task: chosen.subtask, duration: chosen.duration, startISO: chosen.startISO, endISO: chosen.endISO };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -548,7 +554,12 @@ async function buildBriefing(userId, activeContexts, now = new Date()) {
 
         // ── Backward-compatible detail fields (non-schema, for client views) ──
         schemaVersion: SCHEMA_VERSION,
-        focusSchedule: schedule.map(({ startISO, endISO, ...rest }) => rest),
+        // `startISO`/`endISO` are kept (previously stripped here) — the
+        // pre-formatted `time`/`endTime` strings are UTC, which does not
+        // match the LOCAL time the rest of the app (e.g. Project Workspace's
+        // Schedule tab) renders the same instant in. The client formats
+        // `startISO`/`endISO` in the viewer's own timezone instead.
+        focusSchedule: schedule,
         triage: {
             overdue: buckets.overdue.map(slimProject),
             fireNow: buckets.fireNow.map(slimProject),
@@ -577,6 +588,21 @@ function docToContext(doc) {
     return context;
 }
 
+/**
+ * A task document is briefable when it's a real, current project — not an
+ * archived (soft-deleted) project, and not a partial mid-pipeline checkpoint
+ * left behind by a failed run. Same convention `GET /api/projects` and
+ * `GET /api/tasks` already use; the briefing agent previously had no such
+ * filter at all, so a deleted/archived project's still-pending tasks kept
+ * showing up in the morning briefing indefinitely.
+ * @param {FirebaseFirestore.QueryDocumentSnapshot} doc
+ * @returns {boolean}
+ */
+export function isBriefableDoc(doc) {
+    const meta = doc.data()?.metadata ?? {};
+    return meta.archived !== true && meta.pipelineFailed !== true;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cron sweep — was runBriefingAgent()
 // ─────────────────────────────────────────────────────────────────────────────
@@ -601,6 +627,7 @@ export async function runBriefingCron() {
 
     const byUser = {};
     snap.docs.forEach((doc) => {
+        if (!isBriefableDoc(doc)) return;
         let context;
         try {
             context = docToContext(doc);
@@ -663,6 +690,7 @@ export async function generateBriefingNow(userId) {
 
     const contexts = [];
     snap.docs.forEach((doc) => {
+        if (!isBriefableDoc(doc)) return;
         try {
             contexts.push(docToContext(doc));
         } catch (err) {

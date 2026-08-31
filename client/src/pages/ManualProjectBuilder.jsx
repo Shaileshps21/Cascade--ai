@@ -3,42 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { createManualProject } from '../api/index.js';
-
-const PRIORITIES = ['low', 'medium', 'high', 'critical'];
-const PRIORITY_STYLES = {
-  low: 'text-muted border-border',
-  medium: 'text-warning border-warning/30',
-  high: 'text-orange-400 border-orange-500/30',
-  critical: 'text-danger border-danger/30',
-};
+import { SubtaskFieldsRow, emptySubtaskValue, serializeSubtaskValue } from '../components/SubtaskFields.jsx';
 
 let uid = 0;
 const nextId = () => `local-${++uid}-${Date.now()}`;
 
 function newSubtask() {
-  return {
-    id: nextId(),
-    title: '',
-    estimatedMinutes: '',
-    priority: 'medium',
-    // Start date/time are kept as two separate native inputs (rather than one
-    // datetime-local) so each can carry its own visible label — combined into
-    // one ISO startTime only at save time, once both halves are filled in.
-    startDate: '',
-    startTimeOfDay: '',
-    deadline: '', // "End Date (optional)" — a calendar-day cap on the subtask, not a precise end time.
-  };
-}
-
-// Small labeled-field wrapper shared by every subtask input so each one gets
-// a real visible label instead of relying on a placeholder or title tooltip.
-function Field({ label, width = '', children }) {
-  return (
-    <div className={`flex flex-col gap-1 ${width}`}>
-      <label className="text-[10px] text-muted uppercase tracking-wide font-semibold">{label}</label>
-      {children}
-    </div>
-  );
+  return { id: nextId(), ...emptySubtaskValue() };
 }
 
 function newModule() {
@@ -116,15 +87,7 @@ export default function ManualProjectBuilder() {
         title: m.title.trim(),
         subtasks: m.subtasks
           .filter((s) => s.title.trim())
-          .map((s) => ({
-            title: s.title.trim(),
-            estimatedMinutes: s.estimatedMinutes ? Number(s.estimatedMinutes) : undefined,
-            priority: s.priority,
-            deadline: s.deadline ? new Date(s.deadline).toISOString() : undefined,
-            startTime: (s.startDate && s.startTimeOfDay)
-              ? new Date(`${s.startDate}T${s.startTimeOfDay}`).toISOString()
-              : undefined,
-          })),
+          .map(serializeSubtaskValue),
       }))
       .filter((m) => m.title && m.subtasks.length > 0);
 
@@ -240,60 +203,7 @@ export default function ManualProjectBuilder() {
             <div className="space-y-4 pl-2 sm:pl-6 border-l border-border">
               {mod.subtasks.map((st) => (
                 <div key={st.id} className="flex items-start gap-2 pb-3 border-b border-border/60 last:border-0 last:pb-0">
-                  <div className="flex-1 flex flex-wrap items-end gap-x-3 gap-y-2">
-                    <Field label="Subtask" width="flex-1 min-w-[160px]">
-                      <input
-                        value={st.title}
-                        onChange={(e) => updateSubtask(mod.id, st.id, { title: e.target.value })}
-                        placeholder="Subtask title"
-                        className="input-field text-sm py-1.5"
-                      />
-                    </Field>
-                    <Field label="Priority" width="w-28">
-                      <select
-                        value={st.priority}
-                        onChange={(e) => updateSubtask(mod.id, st.id, { priority: e.target.value })}
-                        className={`input-field text-xs py-1.5 capitalize border ${PRIORITY_STYLES[st.priority] || ''}`}
-                      >
-                        {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Est. minutes" width="w-24">
-                      <input
-                        type="number"
-                        min="0"
-                        step="5"
-                        value={st.estimatedMinutes}
-                        onChange={(e) => updateSubtask(mod.id, st.id, { estimatedMinutes: e.target.value })}
-                        placeholder="30"
-                        className="input-field text-sm py-1.5"
-                      />
-                    </Field>
-                    <Field label="Start Date" width="w-36">
-                      <input
-                        type="date"
-                        value={st.startDate}
-                        onChange={(e) => updateSubtask(mod.id, st.id, { startDate: e.target.value })}
-                        className="input-field text-xs py-1.5"
-                      />
-                    </Field>
-                    <Field label="Start Time" width="w-28">
-                      <input
-                        type="time"
-                        value={st.startTimeOfDay}
-                        onChange={(e) => updateSubtask(mod.id, st.id, { startTimeOfDay: e.target.value })}
-                        className="input-field text-xs py-1.5"
-                      />
-                    </Field>
-                    <Field label="End Date (optional)" width="w-36">
-                      <input
-                        type="date"
-                        value={st.deadline}
-                        onChange={(e) => updateSubtask(mod.id, st.id, { deadline: e.target.value })}
-                        className="input-field text-xs py-1.5"
-                      />
-                    </Field>
-                  </div>
+                  <SubtaskFieldsRow value={st} onChange={(patch) => updateSubtask(mod.id, st.id, patch)} />
                   {mod.subtasks.length > 1 && (
                     <button
                       type="button"

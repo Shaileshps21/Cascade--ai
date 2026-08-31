@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { GripVertical, Plus } from 'lucide-react';
 import { reorderModuleTasks, addModuleTask } from '../api/index.js';
+import { SubtaskFieldsRow, emptySubtaskValue, serializeSubtaskValue } from './SubtaskFields.jsx';
 
 const RISK_DOT = { high: 'bg-danger', medium: 'bg-warning', low: 'bg-success' };
 const STATUS_LABEL = { not_started: 'Not started', in_progress: 'In progress', completed: 'Completed' };
@@ -57,22 +58,23 @@ function TaskRow({ projectId, task, draggable, isDragging, isDropTarget, onDragS
   );
 }
 
-// QuickAddSubtask — one-line input to append a subtask to this module with no
-// AI pipeline run. Enter to save; the field clears and stays focused so
-// several subtasks can be added back-to-back.
+// QuickAddSubtask — appends a subtask to this module with no AI pipeline run.
+// Same labeled Subtask/Priority/Est. minutes/Start Date/Start Time/End Date
+// field group as the Manual Project Builder (SubtaskFields.jsx) — one shared
+// component, so a subtask looks and behaves identically whether it's being
+// added to an AI-generated or a manually-built module.
 function QuickAddSubtask({ onAdd }) {
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState(emptySubtaskValue());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
   const submit = async () => {
-    const title = value.trim();
-    if (!title || submitting) return;
+    if (!value.title.trim() || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      await onAdd(title);
-      setValue('');
+      await onAdd(serializeSubtaskValue(value));
+      setValue(emptySubtaskValue());
     } catch (err) {
       setError(err.message || 'Failed to add subtask.');
     } finally {
@@ -81,19 +83,19 @@ function QuickAddSubtask({ onAdd }) {
   };
 
   return (
-    <div className="pt-1">
-      <div className="flex items-center gap-2 px-1.5">
-        <Plus className="w-3.5 h-3.5 text-muted flex-shrink-0" />
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-          placeholder="Quick-add a subtask… (Enter to save)"
-          disabled={submitting}
-          className="flex-1 min-w-0 bg-transparent text-sm text-secondary placeholder:text-muted py-1.5 outline-none border-b border-transparent focus:border-brand-500/50 transition-colors disabled:opacity-60"
-        />
+    <div className="pt-2">
+      <div className="flex items-start gap-2 px-1.5">
+        <SubtaskFieldsRow value={value} onChange={(patch) => setValue((v) => ({ ...v, ...patch }))} disabled={submitting} />
       </div>
-      {error && <p className="text-[11px] text-danger pl-7 pt-0.5">{error}</p>}
+      {error && <p className="text-[11px] text-danger px-1.5 pt-1">{error}</p>}
+      <button
+        type="button"
+        onClick={submit}
+        disabled={submitting || !value.title.trim()}
+        className="flex items-center gap-1 text-xs text-brand-500 hover:text-brand-400 transition-colors px-1.5 pt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Plus className="w-3.5 h-3.5" /> {submitting ? 'Adding…' : 'Add subtask'}
+      </button>
     </div>
   );
 }
@@ -143,7 +145,7 @@ function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks, onQu
               onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
             />
           ))}
-          <QuickAddSubtask onAdd={(title) => onQuickAdd(module.id, title)} />
+          <QuickAddSubtask onAdd={(subtaskData) => onQuickAdd(module.id, subtaskData)} />
         </div>
       )}
     </div>
@@ -172,8 +174,8 @@ export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
   // taskId from the server (module.tasks entries are full task objects, and
   // every downstream link/drag/complete action depends on that id being
   // real), so the module simply re-renders with it once the request resolves.
-  const handleQuickAdd = async (moduleId, title) => {
-    const { task } = await addModuleTask(projectId, moduleId, { title });
+  const handleQuickAdd = async (moduleId, subtaskData) => {
+    const { task } = await addModuleTask(projectId, moduleId, subtaskData);
     setMilestones((prev) =>
       prev.map((m) => ({
         ...m,

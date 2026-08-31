@@ -368,6 +368,13 @@ export async function orchestrateTask(processId, rawInput, userId, explicitDeadl
       context.usedPersonalKey = isPersonal;
       context.metadata.pipelineStage = 'complete';
       context.metadata.pipelineFailed = false;
+      // Marks that the AI pipeline has actually run for this project — set
+      // here regardless of origin (fresh run or a manual project's "Let AI
+      // enhance"), since it's the one thing the manual-mode badge/CTA in
+      // ProjectCard.jsx need to know (a manual project can already have
+      // `context.schedule` from the user's own subtask times, so `hasSchedule`
+      // alone can't tell "AI enhanced" apart from "user timed it by hand").
+      context.metadata.aiEnhanced = true;
       context = await persistContext(taskId, context, sseEmit);
 
       // ── 15. task_history entry (seeds the Memory Agent) ──────────────────

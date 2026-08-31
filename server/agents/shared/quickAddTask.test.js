@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { nextTaskId, buildQuickAddTask } from './quickAddTask.js';
+import { nextTaskId, buildQuickAddTask, buildQuickAddScheduleEntry } from './quickAddTask.js';
 
 describe('nextTaskId', () => {
     test('returns T1 for an empty task list', () => {
@@ -60,5 +60,37 @@ describe('buildQuickAddTask', () => {
         const task = buildQuickAddTask({ taskId: 'T1', milestoneId: 'M1', moduleId: 'MOD1', title: 'x' });
         assert.equal(task.isBuffer, false);
         assert.equal(task.isReview, false);
+    });
+
+    test('deadline defaults to null when absent or invalid, otherwise normalizes to ISO', () => {
+        assert.equal(buildQuickAddTask({ taskId: 'T1', milestoneId: 'M1', moduleId: 'MOD1', title: 'x' }).deadline, null);
+        assert.equal(buildQuickAddTask({ taskId: 'T1', milestoneId: 'M1', moduleId: 'MOD1', title: 'x', deadline: 'not-a-date' }).deadline, null);
+        assert.equal(
+            buildQuickAddTask({ taskId: 'T1', milestoneId: 'M1', moduleId: 'MOD1', title: 'x', deadline: '2026-09-01' }).deadline,
+            new Date('2026-09-01').toISOString()
+        );
+    });
+});
+
+describe('buildQuickAddScheduleEntry', () => {
+    test('derives endTime from startTime + estimatedMinutes', () => {
+        const entry = buildQuickAddScheduleEntry({
+            taskId: 'T7', title: 'Fix the flaky test', estimatedMinutes: 30, priority: 'high',
+            startTime: '2026-09-01T09:00:00.000Z',
+        });
+        assert.equal(entry.taskId, 'T7');
+        assert.equal(entry.taskName, 'Fix the flaky test');
+        assert.equal(entry.priority, 'high');
+        assert.equal(entry.startTime, '2026-09-01T09:00:00.000Z');
+        assert.equal(entry.endTime, '2026-09-01T09:30:00.000Z');
+        assert.equal(entry.isBuffer, false);
+        assert.equal(entry.isReview, false);
+    });
+
+    test('returns null for an unparseable startTime instead of an Invalid Date', () => {
+        const entry = buildQuickAddScheduleEntry({
+            taskId: 'T7', title: 'x', estimatedMinutes: 30, priority: 'medium', startTime: 'not-a-date',
+        });
+        assert.equal(entry, null);
     });
 });

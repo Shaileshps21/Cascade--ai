@@ -13,6 +13,74 @@ rather than left implied.
 
 ---
 
+## 2026-08-31 — Finish LifeSaver→Cascade rebrand: fix typos and a real badge-label bug introduced mid-rename ✅
+
+**Trigger.** The user renamed the product from LifeSaver to Cascade across the live-code brand strings themselves (calendar event prefixes, the server boot banner, in-app copy) as their own hands-on edit, alongside the fixes below in this same local-testing session. Reviewing that diff before committing surfaced three typos and one real bug introduced by the rename, none of them the user's intent.
+
+**Typos fixed** (all cosmetic, no logic involved — each was a single-file substitution):
+- `server/index.js`'s boot banner: `Caascade` → `Cascade`.
+- `server/agents/google_calendar_agent/agent.test.js`'s test description: `Cascasw` → `Cascade` (the assertion itself was already correct — only the test's own name had the typo).
+- `server/agents/schedulerAgent_legacy.js`: `Cascase` → `Cascade` in the one live calendar-summary string, plus three more `LifeSaver` mentions left behind in that file's commented-out (dead) reference code, updated for consistency.
+- `client/src/components/ApiKeySetup.jsx`: a commented-out (dead) confirm-dialog string still said "use LifeSaver" — updated to "use Cascade".
+
+**Real bug fixed, not just a typo.** `ApiKeySetup.jsx`'s `buildProviders()` had the **Groq** provider card's badge reading `` `${geminiLabel} · Ultra-fast · Recommended` `` instead of `` `${groqLabel} · ... ` `` — a copy/paste slip during the rename pass that would have shown "Gemini 2.5 Pro" branding on the Groq option (confirmed live in the browser: the Groq row displayed "Gemini 2.5 Pro · Ultra-fast · Recommended" before this fix). Corrected to `groqLabel`.
+
+**Also updated for full consistency**, since these were live/functional strings still saying the old name:
+- `server/agents/knowledge_acquisition_agent/validator.js`'s outbound resource-link-check `USER_AGENT` header: `LifeSaverBot/1.0` → `CascadeBot/1.0`.
+- `server/routes/calendar.js`'s `GET /events` response field `isLifeSaver` → `isCascade` (confirmed unused anywhere client-side via repo-wide grep before renaming, so this is a pure rename with zero behavior change).
+
+**Deliberately NOT touched, flagged instead of silently changed:**
+- `server/config/secrets.js`'s `HKDF_SALT = 'lifesaver.secrets.v1'` — this is a **cryptographic key-derivation salt** for the BYO-API-key encryption feature, not a display string. Changing it would change the derived master key and make every already-stored user API key undecryptable in production. Must never be renamed for branding.
+- `render.yaml`'s Render service name (`lifesaver-server`) — renaming this risks Render treating it as a different service on the next deploy, which could break the existing live URL/environment linkage. Out of scope for a branding pass; a deliberate infra decision if ever done.
+- `client/package.json`/`server/package.json`'s npm `"name"` fields (`lifesaver-client`/`lifesaver-server`) — internal package metadata, invisible to users, lower priority; left as-is rather than bundled into an unrelated fix-up pass.
+
+**Files changed:**
+- `server/index.js`, `server/agents/google_calendar_agent/agent.test.js`, `server/agents/schedulerAgent_legacy.js` — typo fixes.
+- `client/src/components/ApiKeySetup.jsx` — `geminiLabel`→`groqLabel` badge bug; dead-comment string update.
+- `server/agents/knowledge_acquisition_agent/validator.js` — `USER_AGENT` string.
+- `server/routes/calendar.js` — `isLifeSaver` → `isCascade` field rename.
+
+**Verified:** full server suite 402/402 passing (unchanged — no test asserted on the old typo strings except the one test-description typo itself, which was updated). `client` production build succeeds (2170 modules, 0 errors). The `ApiKeySetup.jsx` badge bug was confirmed live in the browser before the fix (Groq row showing "Gemini 2.5 Pro" text) during the same session's manual testing pass.
+
+---
+
+## 2026-08-31 — Manual-project "manual" badge disappearing early, subtask form redesign shared with Quick-Add, briefing agent timezone mismatch + archived-project leakage ✅
+
+**Trigger.** Three user reports: (1) the "manual" badge and "Let AI enhance this" CTA stopped appearing on manually-built projects that used to show them; (2) Quick-Add Subtask (added previously — one-line title-only input) should instead use the same labeled Subtask/Priority/Est. minutes/Start Date/Start Time/End Date field group the Manual Project Builder already has, shared between both; (3) the morning briefing shows task times that don't match the Roadmap/Schedule tab, and still includes tasks from archived (deleted) projects.
+
+**Bug 1 root cause.** `ProjectCard.jsx`'s manual badge/CTA were gated on `project.manualMode && !project.hasSchedule`. That was fine when a manual project could only get a schedule via "Let AI enhance" — but the Manual Project Builder can now build `context.schedule` on its own the moment every subtask has its own Start Date + Start Time (added in an earlier session). Once users started actually using those fields, `hasSchedule` flipped `true` immediately at creation, hiding the badge/CTA before the AI pipeline ever touched the project.
+
+**Fix.** Added a dedicated `context.metadata.aiEnhanced` flag, distinct from `hasSchedule` — `false` at manual creation, set `true` only when the orchestrator's pipeline actually completes (fresh run or "Let AI enhance", same code path). `ProjectCard.jsx` now gates on `!project.aiEnhanced` instead of `!project.hasSchedule`. Backward-compatible for projects written before this field existed: `aiEnhanced` falls back to `context.metadata.pipelineStage === 'complete'`, which was — and still is — only ever reached by a completed orchestrator run, so old fully-enhanced manual projects don't regress and old not-yet-enhanced ones correctly show the badge again.
+
+**Bug 2.** Extracted the Manual Project Builder's per-subtask field group (labeled Subtask/Priority/Est. minutes/Start Date/Start Time/End Date inputs) into a new shared `client/src/components/SubtaskFields.jsx` (`SubtaskFieldsRow`, `emptySubtaskValue()`, `serializeSubtaskValue()`). Both `ManualProjectBuilder.jsx` and `RoadmapTree.jsx`'s `QuickAddSubtask` now render the same component, so a subtask looks and behaves identically whether it's being added while building a project by hand or quick-added into an already-existing AI-generated or manual module. Quick-Add's server route (`POST /:projectId/tasks`) now also accepts `deadline`/`startTime`: a start time schedules just that one task (`buildQuickAddScheduleEntry()`, new in `quickAddTask.js`) — appended to the project's existing schedule if it has one, or creating a minimal one otherwise — and syncs it to Google Calendar if connected/enabled, mirroring what the Manual Project Builder already does per-subtask.
+
+**Bug 3a root cause (time mismatch).** `briefing_agent.js` pre-formatted every scheduled task's time server-side via `formatTimeUTC()` (slicing the ISO string's UTC hour/minute) and sent only that baked string to the client — while `ProjectWorkspace.jsx`'s Schedule tab renders the same `scheduledStart` instant via `format(date, 'HH:mm')` (date-fns, **local browser timezone**). For any viewer not in UTC+0, the briefing and the Roadmap/Schedule tab showed different times for the identical task.
+
+**Fix.** `focusSchedule` entries and `todayFocusBlock` now also carry `startISO`/`endISO` (previously stripped out of `focusSchedule` entirely). `dailyBriefing.jsx` formats these locally via a new `formatLocalTime()` helper using date-fns' `'HH:mm'` token — the same 24-hour, local-timezone format the Schedule tab already uses — instead of trusting the server's UTC-baked `time` string. The "Generated at" footer timestamp was also switched to the same helper (previously `toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})` with no `hour12` override, which renders 12-hour AM/PM in most English locales).
+
+**Bug 3b root cause (archived tasks leaking into briefings).** Neither `runBriefingCron()` nor `generateBriefingNow()` filtered out archived (soft-deleted) or pipeline-failed task documents before building briefings — every other list endpoint (`GET /api/projects`, `GET /api/tasks`) already excludes both, but the briefing agent never did. An archived project with incomplete tasks kept showing up in the morning briefing indefinitely.
+
+**Fix.** New exported `isBriefableDoc(doc)` helper (`metadata.archived !== true && metadata.pipelineFailed !== true`), applied before constructing a context from every Firestore doc in both the cron sweep and the on-demand path — same convention `routes/tasks.js` already uses.
+
+**Files changed:**
+- `server/routes/tasks.js` — `POST /manual` sets `context.metadata.aiEnhanced = false`.
+- `server/agents/orchestrator.js` — sets `context.metadata.aiEnhanced = true` at pipeline completion.
+- `server/agents/contextManager.js` — `toClientTask()` exposes `aiEnhanced` (with the `pipelineStage === 'complete'` fallback for old docs).
+- `server/routes/projects.js` — `GET /` now includes `aiEnhanced`; `POST /:projectId/tasks` accepts `deadline`/`startTime`, builds/extends `context.schedule`, syncs to calendar.
+- `client/src/components/ProjectCard.jsx` — badge/CTA gate switched to `aiEnhanced`.
+- `client/src/components/SubtaskFields.jsx` (new) — shared subtask field group.
+- `client/src/pages/ManualProjectBuilder.jsx` — uses the shared component.
+- `client/src/components/RoadmapTree.jsx` — `QuickAddSubtask` uses the shared component; passes the full subtask payload through.
+- `client/src/api/index.js` — `addModuleTask()` accepts `deadline`/`startTime`.
+- `server/agents/shared/quickAddTask.js` — `buildQuickAddTask()` accepts `deadline`; new `buildQuickAddScheduleEntry()`.
+- `server/agents/briefing_agent/agent.js` — new exported `isBriefableDoc()`, applied in both entry points; `focusSchedule`/`todayFocusBlock` keep `startISO`/`endISO`.
+- `client/src/components/dailyBriefing.jsx` — new `formatLocalTime()` helper; focus-block times and the "Generated at" footer both use it.
+- `server/agents/briefing_agent/agent.test.js`, `server/agents/shared/quickAddTask.test.js` — updated/new tests for the above.
+
+**Verified:** full server suite 402/402 passing (10 new/updated across `briefing_agent.test.js` and `quickAddTask.test.js`). `client` production build succeeds (2170 modules, 0 errors). Not yet exercised live in the browser this session — recommend confirming: a manual project with every subtask timed still shows the "manual" badge and enhance CTA until actually enhanced; Quick-Add on both an AI-generated and a manual project's module renders the full field set and a timed quick-add appears on the Schedule tab/calendar; and the morning briefing's focus-block times match the Roadmap tab for a non-UTC browser timezone, with an archived project absent from it.
+
+---
+
 ## 2026-08-30 — Groq→Gemini fallback crashed with "fallbackFn is not a function" (reported live in production) ✅
 
 **Trigger.** User saw `time_estimation_agent failed: fallbackFn is not a function` on the live deployed app (`https://cascade2107.web.app/`), surfaced as a red "System" error in the pipeline SSE stream during the Estimation stage.
