@@ -1,4 +1,4 @@
-# ⚡ Cascade — AI Productivity Companion
+#Cascade — AI Productivity Companion
 
 > *"Don't miss deadlines. Let agents handle it."*
 
