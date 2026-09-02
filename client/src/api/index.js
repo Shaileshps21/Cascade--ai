@@ -119,6 +119,24 @@ export const addModuleTask = (projectId, moduleId, { title, estimatedMinutes, pr
     body: JSON.stringify({ moduleId, title, estimatedMinutes, priority, deadline, startTime }),
   });
 
+// Add Module: append a new, empty module to a milestone. Works on both
+// AI-generated and manually-built projects.
+export const addProjectModule = (projectId, { milestoneId, title } = {}) =>
+  apiFetch(`/api/projects/${projectId}/modules`, {
+    method: 'POST',
+    body: JSON.stringify({ milestoneId, title }),
+  });
+
+// Delete a subtask — only allowed by the server when its module was
+// manually added (Add Module, or an original Manual Project Builder module).
+export const deleteModuleTask = (projectId, taskId) =>
+  apiFetch(`/api/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
+
+// Delete a module — only allowed by the server when it's manually added AND
+// currently empty (no subtasks).
+export const deleteProjectModule = (projectId, moduleId) =>
+  apiFetch(`/api/projects/${projectId}/modules/${moduleId}`, { method: 'DELETE' });
+
 // ── Calendar ──────────────────────────────────────────────────────────────────
 export const getCalendarStatus = () => apiFetch('/api/calendar/status');
 export const getCalendarEvents = () => apiFetch('/api/calendar/events');

@@ -148,7 +148,7 @@ export default function ExecutionStepItem({ step, onUpdate }) {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 onBlur={saveNotes}
-                placeholder="Add a note for this step... (markdown: **bold**, *italic*, `code`, [link](url), - list)"
+                placeholder="Add a note for this task..."
                 rows={2}
                 autoFocus={focusNotes}
                 className="input-field text-xs py-2"

@@ -28,7 +28,8 @@ import {
 import { computeLiveRiskScore, computeDelayProbability } from '../agents/progress_tracking_agent/agent.js';
 import { applyStepUpdate, ALLOWED_STEP_STATUSES } from '../agents/shared/stepProgress.js';
 import { nextTaskId, buildQuickAddTask, buildQuickAddScheduleEntry } from '../agents/shared/quickAddTask.js';
-import { syncScheduleToCalendar } from '../agents/google_calendar_agent/agent.js';
+import { nextModuleId, buildManualModule, resolveModuleSource } from '../agents/shared/quickAddModule.js';
+import { syncScheduleToCalendar, deleteCalendarEvents } from '../agents/google_calendar_agent/agent.js';
 
 const router = express.Router();
 
@@ -45,6 +46,24 @@ function withHealth(context) {
         completionProbability: Math.max(0, 100 - computeDelayProbability(context)),
     });
     return { ...project, health };
+}
+
+// toClientTask() sorts the flat subtask list (Dashboard's "next best
+// action", Schedule tab, etc.) by task.order, not by position in
+// module.tasks — renumber every task's order to match the tree walk
+// whenever the tree itself changes (reorder, or a task being removed from
+// it), so the flat views agree with what the Roadmap tab shows.
+function renumberTaskOrder(context) {
+    const tasksById = new Map((context.planning.tasks ?? []).map((t) => [t.taskId, t]));
+    let order = 1;
+    for (const milestone of context.planning?.milestones ?? []) {
+        for (const mod of milestone.modules ?? []) {
+            for (const taskId of mod.tasks ?? []) {
+                const task = tasksById.get(taskId);
+                if (task) task.order = order++;
+            }
+        }
+    }
 }
 
 // ── GET /api/projects — Dashboard project cards ─────────────────────────────
@@ -247,6 +266,94 @@ router.patch('/:projectId/tasks/:taskId/notes', requireAuth, async (req, res) =>
     }
 });
 
+// ── POST /api/projects/:projectId/modules — Add Module ──────────────────────
+// Appends a new, empty module to an existing milestone without running any
+// agent — works identically on AI-generated and manually-built projects,
+// since both store the same Milestones → Modules → Tasks shape. The new
+// module is tagged source: 'manual' (see shared/quickAddModule.js), which is
+// what lets its subtasks — including ones later Quick-Added into it — be
+// deleted, unlike subtasks of an AI-planned module.
+// Body: { milestoneId, title }
+router.post('/:projectId/modules', requireAuth, async (req, res) => {
+    const { projectId } = req.params;
+    const { milestoneId, title } = req.body ?? {};
+
+    if (!milestoneId || typeof milestoneId !== 'string') {
+        return res.status(400).json({ error: '`milestoneId` is required.' });
+    }
+    if (!title?.trim()) {
+        return res.status(400).json({ error: '`title` is required.' });
+    }
+
+    try {
+        const found = await loadOwnedContext(projectId, req.user.uid);
+        if (!found) return res.status(404).json({ error: 'Project not found' });
+        const { doc, context } = found;
+
+        const targetMilestone = (context.planning?.milestones ?? []).find((m) => m.id === milestoneId);
+        if (!targetMilestone) return res.status(404).json({ error: 'Milestone not found' });
+
+        const moduleId = nextModuleId(context.planning.milestones);
+        const newModule = buildManualModule({ id: moduleId, title: title.trim() });
+        targetMilestone.modules = [...(targetMilestone.modules ?? []), newModule];
+
+        context.metadata.updatedAt = new Date().toISOString();
+        await doc.ref.set(toFirestoreDocument(context));
+
+        const project = withHealth(context);
+        const clientModule = project.milestones
+            .find((m) => m.id === milestoneId)
+            ?.modules.find((m) => m.id === moduleId);
+
+        res.json({ success: true, module: clientModule, project });
+    } catch (err) {
+        console.error('[Project Module POST]', err);
+        res.status(500).json({ error: 'Failed to add module' });
+    }
+});
+
+// ── DELETE /api/projects/:projectId/modules/:moduleId — Delete Module ───────
+// Only deletable when the module is manually-added (see resolveModuleSource())
+// AND currently empty — deleting a non-empty module would either strand its
+// subtasks or require a cascading delete this endpoint doesn't attempt. To
+// remove a manually-added module that still has subtasks, delete each
+// subtask first (DELETE .../tasks/:taskId), then this becomes a no-op-safe
+// empty-module delete.
+router.delete('/:projectId/modules/:moduleId', requireAuth, async (req, res) => {
+    const { projectId, moduleId } = req.params;
+
+    try {
+        const found = await loadOwnedContext(projectId, req.user.uid);
+        if (!found) return res.status(404).json({ error: 'Project not found' });
+        const { doc, context } = found;
+
+        let targetMilestone = null;
+        let targetModule = null;
+        for (const milestone of context.planning?.milestones ?? []) {
+            const mod = (milestone.modules ?? []).find((m) => m.id === moduleId);
+            if (mod) { targetMilestone = milestone; targetModule = mod; break; }
+        }
+        if (!targetModule) return res.status(404).json({ error: 'Module not found' });
+
+        if (resolveModuleSource(targetModule, context.metadata) !== 'manual') {
+            return res.status(403).json({ error: "This module is AI-generated and can't be deleted." });
+        }
+        if ((targetModule.tasks ?? []).length > 0) {
+            return res.status(400).json({ error: 'Delete this module\'s subtasks first — only an empty module can be deleted.' });
+        }
+
+        targetMilestone.modules = targetMilestone.modules.filter((m) => m.id !== moduleId);
+
+        context.metadata.updatedAt = new Date().toISOString();
+        await doc.ref.set(toFirestoreDocument(context));
+
+        res.json({ success: true, project: withHealth(context) });
+    } catch (err) {
+        console.error('[Project Module DELETE]', err);
+        res.status(500).json({ error: 'Failed to delete module' });
+    }
+});
+
 // ── POST /api/projects/:projectId/tasks — Quick-Add Subtask ─────────────────
 // Appends one subtask to an existing module without running any agent — for
 // when the user notices a step the AI (or their own manual plan) missed and
@@ -389,22 +496,7 @@ router.patch('/:projectId/modules/:moduleId/reorder', requireAuth, async (req, r
         }
 
         targetModule.tasks = taskIds;
-
-        // toClientTask() sorts the flat subtask list (Dashboard's "next best
-        // action", Schedule tab, etc.) by task.order, not by position in
-        // module.tasks — renumber every task's order to match the tree so
-        // the drag actually changes what those views show, not just the
-        // Roadmap tab's own rendering of this module.
-        const tasksById = new Map((context.planning.tasks ?? []).map((t) => [t.taskId, t]));
-        let order = 1;
-        for (const milestone of context.planning?.milestones ?? []) {
-            for (const mod of milestone.modules ?? []) {
-                for (const taskId of mod.tasks ?? []) {
-                    const task = tasksById.get(taskId);
-                    if (task) task.order = order++;
-                }
-            }
-        }
+        renumberTaskOrder(context);
 
         context.metadata.updatedAt = new Date().toISOString();
         await doc.ref.set(toFirestoreDocument(context));
@@ -413,6 +505,68 @@ router.patch('/:projectId/modules/:moduleId/reorder', requireAuth, async (req, r
     } catch (err) {
         console.error('[Module Reorder PATCH]', err);
         res.status(500).json({ error: 'Failed to reorder module tasks' });
+    }
+});
+
+// ── DELETE /api/projects/:projectId/tasks/:taskId — Delete Subtask ──────────
+// Only deletable when the task's owning module is manually-added (Add
+// Module, or an original module from a from-scratch Manual Project Builder
+// project) — see resolveModuleSource(). A subtask AI-planned OR
+// Quick-Added into an AI-generated module is never deletable from here.
+router.delete('/:projectId/tasks/:taskId', requireAuth, async (req, res) => {
+    const { projectId, taskId } = req.params;
+
+    try {
+        const found = await loadOwnedContext(projectId, req.user.uid);
+        if (!found) return res.status(404).json({ error: 'Project not found' });
+        const { doc, context } = found;
+
+        const task = (context.planning?.tasks ?? []).find((t) => t.taskId === taskId);
+        if (!task) return res.status(404).json({ error: 'Task not found' });
+
+        let targetModule = null;
+        for (const milestone of context.planning?.milestones ?? []) {
+            const mod = (milestone.modules ?? []).find((m) => m.id === task.moduleId);
+            if (mod) { targetModule = mod; break; }
+        }
+        if (!targetModule) return res.status(404).json({ error: 'Module not found' });
+
+        if (resolveModuleSource(targetModule, context.metadata) !== 'manual') {
+            return res.status(403).json({ error: "This subtask belongs to an AI-generated module and can't be deleted." });
+        }
+
+        // Clean up any calendar event synced for this task before it's gone.
+        const scheduledSlot = (context.schedule?.scheduledTasks ?? []).find((s) => s.taskId === taskId);
+        if (scheduledSlot?.calendarEventId) {
+            try {
+                await deleteCalendarEvents(req.user.uid, [scheduledSlot.calendarEventId]);
+            } catch (calErr) {
+                console.warn('[Project Task DELETE] Calendar cleanup failed (non-fatal):', calErr.message);
+            }
+        }
+
+        context.planning.tasks = context.planning.tasks.filter((t) => t.taskId !== taskId);
+        targetModule.tasks = (targetModule.tasks ?? []).filter((id) => id !== taskId);
+        if (context.schedule?.scheduledTasks) {
+            context.schedule.scheduledTasks = context.schedule.scheduledTasks.filter((s) => s.taskId !== taskId);
+        }
+        // Defensive: strip the deleted task out of any other task's
+        // dependencies so nothing is left pointing at a taskId that no
+        // longer exists.
+        for (const t of context.planning.tasks) {
+            if (Array.isArray(t.dependencies) && t.dependencies.includes(taskId)) {
+                t.dependencies = t.dependencies.filter((id) => id !== taskId);
+            }
+        }
+        renumberTaskOrder(context);
+
+        context.metadata.updatedAt = new Date().toISOString();
+        await doc.ref.set(toFirestoreDocument(context));
+
+        res.json({ success: true, project: withHealth(context) });
+    } catch (err) {
+        console.error('[Project Task DELETE]', err);
+        res.status(500).json({ error: 'Failed to delete subtask' });
     }
 });
 

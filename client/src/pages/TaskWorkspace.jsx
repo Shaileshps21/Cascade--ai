@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import ExecutionStepItem from '../components/ExecutionStepItem.jsx';
@@ -7,6 +7,7 @@ import FocusMode from '../components/FocusMode.jsx';
 import ResourceLink from '../components/ResourceLink.jsx';
 import MarkdownText from '../components/MarkdownText.jsx';
 import { getProjectTask, updateExecutionStep, setTaskNote } from '../api/index.js';
+import { useFocusTimer } from '../context/FocusTimerContext.jsx';
 
 const DIFFICULTY_COLOR = { low: 'text-success', medium: 'text-warning', high: 'text-danger', very_high: 'text-danger' };
 
@@ -69,7 +70,7 @@ function TaskNote({ projectId, taskId, initialText, onSaved }) {
           disabled={saving}
           autoFocus
           rows={3}
-          placeholder="Add a note for this task... (markdown: **bold**, *italic*, `code`, [link](url), - list)"
+          placeholder="Add a note for this task..."
           className="input-field text-sm"
         />
       ) : (
@@ -111,10 +112,14 @@ function TaskTimeline({ project, task }) {
 
 export default function TaskWorkspace() {
   const { projectId, taskId } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { session: focusSession } = useFocusTimer();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [focusMode, setFocusMode] = useState(false);
+  const prevSessionKeyRef = useRef(null);
 
   const fetchTask = useCallback(async () => {
     try {
@@ -129,6 +134,35 @@ export default function TaskWorkspace() {
   }, [projectId, taskId]);
 
   useEffect(() => { fetchTask(); }, [fetchTask]);
+
+  // "Resume Focus Mode" (from the persistent FocusTimerBar shown elsewhere
+  // in the app) navigates here with router state rather than relying on
+  // route params alone — navigating to a path you're already on doesn't
+  // re-trigger a param-keyed effect, so clicking the bar's button while
+  // already sitting on this exact task's page would otherwise do nothing.
+  // The flag is cleared right after so a later refresh/back-navigation to
+  // this same URL doesn't reopen the overlay on its own.
+  useEffect(() => {
+    if (location.state?.openFocusMode) {
+      setFocusMode(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, location.pathname, navigate]);
+
+  // If a session for this exact task ends elsewhere (e.g. "✓ Complete" or
+  // discard clicked on the persistent FocusTimerBar while this page's own
+  // overlay is closed), refetch so the step list doesn't keep showing a now
+  // stale in-progress/incomplete state. Keyed by projectId+taskId together —
+  // taskIds like "T1" are only unique *within* a project, so comparing
+  // taskId alone would misfire when a different project's task happens to
+  // share the same id.
+  useEffect(() => {
+    const matches = focusSession && focusSession.projectId === projectId && focusSession.taskId === taskId;
+    const key = matches ? `${focusSession.projectId}:${focusSession.taskId}` : null;
+    const wasThisTask = prevSessionKeyRef.current === `${projectId}:${taskId}`;
+    if (wasThisTask && !key) fetchTask();
+    prevSessionKeyRef.current = key;
+  }, [focusSession, projectId, taskId, fetchTask]);
 
   const handleStepUpdate = async (stepId, patch) => {
     await updateExecutionStep(projectId, taskId, stepId, patch);
@@ -165,6 +199,7 @@ export default function TaskWorkspace() {
   if (focusMode) {
     return (
       <FocusMode
+        projectId={projectId}
         task={task}
         step={currentStep}
         onUpdate={handleStepUpdate}

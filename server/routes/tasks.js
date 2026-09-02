@@ -222,6 +222,12 @@ router.post('/manual', requireAuth, async (req, res) => {
       acceptanceCriteria: [],
       dependencies: [],
       tasks: taskIds,
+      // Tags every module a from-scratch Manual Project Builder project
+      // creates as manually-added, same as Add Module — see
+      // shared/quickAddModule.js's resolveModuleSource() for how untagged
+      // (pre-existing) manual projects are still recognized without a data
+      // migration.
+      source: 'manual',
     });
   }
 

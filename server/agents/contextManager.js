@@ -16,6 +16,8 @@
  *   commonMistakes, aiGuidance, reflectionQuestions, resources, notes, progress
  */
 
+import { resolveModuleSource } from './shared/quickAddModule.js';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Factory — create a fresh PlanningContext
 // ─────────────────────────────────────────────────────────────────────────────
@@ -469,6 +471,10 @@ export function toClientProject(context) {
                 acceptanceCriteria: mod.acceptanceCriteria ?? [],
                 dependencies: mod.dependencies ?? [],
                 progress: average(tasks.map((t) => t.progress)),
+                // Whether this module's subtasks can be deleted — see
+                // resolveModuleSource()'s doc comment (shared/quickAddModule.js)
+                // for the fallback rule applied to modules with no explicit tag.
+                source: resolveModuleSource(mod, context.metadata),
                 tasks,
             };
         });

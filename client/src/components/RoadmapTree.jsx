@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { GripVertical, Plus } from 'lucide-react';
-import { reorderModuleTasks, addModuleTask } from '../api/index.js';
+import { GripVertical, Plus, Trash2 } from 'lucide-react';
+import { reorderModuleTasks, addModuleTask, addProjectModule, deleteModuleTask, deleteProjectModule } from '../api/index.js';
 import { SubtaskFieldsRow, emptySubtaskValue, serializeSubtaskValue } from './SubtaskFields.jsx';
 
 const RISK_DOT = { high: 'bg-danger', medium: 'bg-warning', low: 'bg-success' };
@@ -23,7 +23,20 @@ function ProgressBar({ value, className = '' }) {
 // reorder, suggestions.md #2). Native HTML5 drag-and-drop, no dependency:
 // the row itself is the drag source, `draggable={false}` on the inner Link
 // stops the browser's own link-drag from taking over.
-function TaskRow({ projectId, task, draggable, isDragging, isDropTarget, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd }) {
+//
+// `deletable` is the module's own source, not this task's — every subtask
+// of a manually-added module can be deleted, regardless of how that
+// particular subtask itself was created (server-enforced too, see
+// routes/projects.js's DELETE route).
+function TaskRow({ projectId, task, draggable, deletable, onDelete, isDragging, isDropTarget, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd }) {
+  const handleDelete = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (window.confirm(`Delete "${task.title}"? This can't be undone.`)) {
+      onDelete();
+    }
+  };
+
   return (
     <div
       draggable={draggable}
@@ -54,6 +67,66 @@ function TaskRow({ projectId, task, draggable, isDragging, isDropTarget, onDragS
           {task.progress}%
         </span>
       </Link>
+      {deletable && (
+        <button
+          type="button"
+          onClick={handleDelete}
+          title="Delete this subtask"
+          className="text-muted hover:text-danger transition-colors pl-0.5 pr-2 flex-shrink-0"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// QuickAddModule — appends a new, empty module to this milestone with no AI
+// pipeline run. Works on AI-generated and manually-built projects alike; the
+// new module is tagged manually-added server-side, which is what makes its
+// (future) subtasks deletable.
+function QuickAddModule({ onAdd }) {
+  const [title, setTitle] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = async () => {
+    if (!title.trim() || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onAdd(title.trim());
+      setTitle('');
+    } catch (err) {
+      setError(err.message || 'Failed to add module.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="pt-1">
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          placeholder="New module name…"
+          disabled={submitting}
+          autoComplete="off"
+          className="input-field text-sm flex-1"
+        />
+        <button
+          type="button"
+          onClick={submit}
+          disabled={submitting || !title.trim()}
+          className="flex items-center gap-1 text-xs text-brand-500 hover:text-brand-400 transition-colors px-2 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+        >
+          <Plus className="w-3.5 h-3.5" /> {submitting ? 'Adding…' : 'Add module'}
+        </button>
+      </div>
+      {error && <p className="text-[11px] text-danger pt-1">{error}</p>}
     </div>
   );
 }
@@ -100,10 +173,15 @@ function QuickAddSubtask({ onAdd }) {
   );
 }
 
-function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks, onQuickAdd }) {
+function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks, onQuickAdd, onDeleteTask, onDeleteModule }) {
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
   const draggableList = module.tasks.length > 1;
+  const tasksDeletable = module.source === 'manual';
+  // A manually-added module can only be deleted while it's still empty — see
+  // routes/projects.js's DELETE .../modules/:moduleId for why (no cascading
+  // delete of a non-empty module's subtasks).
+  const moduleDeletable = tasksDeletable && module.tasks.length === 0;
 
   const handleDrop = (dropIndex) => {
     if (dragIndex !== null && dragIndex !== dropIndex) {
@@ -116,18 +194,37 @@ function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks, onQu
     setOverIndex(null);
   };
 
+  const handleDeleteModule = (e) => {
+    e.stopPropagation();
+    if (window.confirm(`Delete the empty module "${module.title}"? This can't be undone.`)) {
+      onDeleteModule(module.id);
+    }
+  };
+
   return (
     <div className="border border-border rounded-lg overflow-hidden">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-3 px-3 py-2.5 bg-base hover:bg-surface-hover transition-colors text-left"
-      >
-        <span className={`text-muted text-xs transition-transform ${isOpen ? 'rotate-90' : ''}`}>›</span>
-        <span className="text-sm font-medium text-secondary flex-1 min-w-0 truncate">{module.title}</span>
-        <span className="text-[11px] text-muted flex-shrink-0 font-mono tabular-nums">{module.tasks.length} tasks</span>
-        <div className="w-16 flex-shrink-0"><ProgressBar value={module.progress} /></div>
-        <span className="text-[11px] font-semibold text-secondary w-9 text-right flex-shrink-0 font-mono tabular-nums">{module.progress}%</span>
-      </button>
+      <div className="w-full flex items-center bg-base hover:bg-surface-hover transition-colors">
+        <button
+          onClick={onToggle}
+          className="flex items-center gap-3 px-3 py-2.5 flex-1 min-w-0 text-left"
+        >
+          <span className={`text-muted text-xs transition-transform ${isOpen ? 'rotate-90' : ''}`}>›</span>
+          <span className="text-sm font-medium text-secondary flex-1 min-w-0 truncate">{module.title}</span>
+          <span className="text-[11px] text-muted flex-shrink-0 font-mono tabular-nums">{module.tasks.length} tasks</span>
+          <div className="w-16 flex-shrink-0"><ProgressBar value={module.progress} /></div>
+          <span className="text-[11px] font-semibold text-secondary w-9 text-right flex-shrink-0 font-mono tabular-nums">{module.progress}%</span>
+        </button>
+        {moduleDeletable && (
+          <button
+            type="button"
+            onClick={handleDeleteModule}
+            title="Delete this empty module"
+            className="text-muted hover:text-danger transition-colors px-3 flex-shrink-0"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
       {isOpen && (
         <div className="px-2 py-1.5 bg-base">
           {module.tasks.map((task, i) => (
@@ -136,6 +233,8 @@ function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks, onQu
               projectId={projectId}
               task={task}
               draggable={draggableList}
+              deletable={tasksDeletable}
+              onDelete={() => onDeleteTask(module.id, task.id)}
               isDragging={dragIndex === i}
               isDropTarget={overIndex === i && dragIndex !== i}
               onDragStart={() => setDragIndex(i)}
@@ -184,6 +283,55 @@ export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
         ),
       }))
     );
+  };
+
+  // Add Module: no optimistic insert — the new module needs a real,
+  // server-issued id (same reasoning as Quick-Add Subtask above).
+  const handleAddModule = async (milestoneId, title) => {
+    const { module } = await addProjectModule(projectId, { milestoneId, title });
+    setMilestones((prev) =>
+      prev.map((m) => (m.id !== milestoneId ? m : { ...m, modules: [...m.modules, module] }))
+    );
+  };
+
+  // Delete Subtask: optimistic removal with rollback on failure, matching
+  // the reorder pattern below. The server independently re-checks that the
+  // task's module is manually-added — the UI only ever offers this button
+  // for such tasks in the first place (see ModuleBlock's tasksDeletable).
+  const handleDeleteTask = async (moduleId, taskId) => {
+    const previous = milestones;
+    setMilestones((prev) =>
+      prev.map((m) => ({
+        ...m,
+        modules: m.modules.map((mod) =>
+          mod.id !== moduleId ? mod : { ...mod, tasks: mod.tasks.filter((t) => t.id !== taskId) }
+        ),
+      }))
+    );
+    setReorderError(null);
+    try {
+      await deleteModuleTask(projectId, taskId);
+    } catch (err) {
+      setMilestones(previous);
+      setReorderError(err.message || 'Failed to delete the subtask.');
+    }
+  };
+
+  // Delete Module: only ever offered by ModuleBlock for an empty,
+  // manually-added module — the server independently re-checks both
+  // conditions.
+  const handleDeleteModule = async (moduleId) => {
+    const previous = milestones;
+    setMilestones((prev) =>
+      prev.map((m) => ({ ...m, modules: m.modules.filter((mod) => mod.id !== moduleId) }))
+    );
+    setReorderError(null);
+    try {
+      await deleteProjectModule(projectId, moduleId);
+    } catch (err) {
+      setMilestones(previous);
+      setReorderError(err.message || 'Failed to delete the module.');
+    }
   };
 
   const handleReorderTasks = async (moduleId, newTaskIds) => {
@@ -245,8 +393,11 @@ export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
                     onToggle={() => setOpenModule(openModule === module.id ? null : module.id)}
                     onReorderTasks={handleReorderTasks}
                     onQuickAdd={handleQuickAdd}
+                    onDeleteTask={handleDeleteTask}
+                    onDeleteModule={handleDeleteModule}
                   />
                 ))}
+                <QuickAddModule onAdd={(title) => handleAddModule(milestone.id, title)} />
               </div>
             )}
           </div>

@@ -1,19 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import ResourceLink from './ResourceLink.jsx';
+import { useFocusTimer } from '../context/FocusTimerContext.jsx';
 
-function useElapsedTimer(running) {
-  const [seconds, setSeconds] = useState(0);
-  const intervalRef = useRef(null);
-
-  useEffect(() => {
-    if (running) {
-      intervalRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
-    } else if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-    return () => intervalRef.current && clearInterval(intervalRef.current);
-  }, [running]);
-
+function formatElapsed(elapsedMs) {
+  const seconds = Math.floor(elapsedMs / 1000);
   const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
   const ss = String(seconds % 60).padStart(2, '0');
   return { display: `${mm}:${ss}`, seconds };
@@ -23,29 +13,63 @@ function useElapsedTimer(running) {
  * FocusMode — "Start Working" distraction-free overlay. Shows only the
  * current task, current execution step, its resources, a timer, notes and
  * AI guidance, per the plan's Smart Execution Mode spec.
+ *
+ * The timer itself lives in FocusTimerContext, not here — closing this
+ * overlay (or navigating away entirely) no longer stops it; only Complete
+ * or Discard end the session. See FocusTimerBar for the persistent view
+ * shown elsewhere in the app while a session is active.
  */
-export default function FocusMode({ task, step, onUpdate, onClose }) {
-  const [running, setRunning] = useState(true);
+export default function FocusMode({ projectId, task, step, onUpdate, onClose }) {
+  const { session, elapsedMs, startSession, pause, resume, completeSession, discardSession } = useFocusTimer();
   const [notes, setNotes] = useState(step?.notes ?? '');
-  const timer = useElapsedTimer(running);
   const startedRef = useRef(false);
+
+  const stepId = step?.id ?? step?.stepId;
+  // taskIds like "T1" are only unique *within* a project, so projectId must
+  // be part of this comparison — otherwise this screen would mistake a
+  // session running in a different project's identically-numbered task for
+  // this one.
+  const isThisStepActive = !!session && session.projectId === projectId && session.taskId === task?.id && session.stepId === stepId;
+  const conflictingSession = !!session && !isThisStepActive;
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = ''; };
   }, []);
 
+  // Join (or start) this step's timing session — a no-op if it's already
+  // the active one (e.g. re-entering Focus Mode via "Resume Focus Mode").
+  useEffect(() => {
+    if (!step || conflictingSession || isThisStepActive) return;
+    startSession(projectId, task, step);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, projectId, task?.id, conflictingSession, isThisStepActive]);
+
   // Pomodoro-style time tracking (suggestions.md #5): mark the step
   // in_progress the instant focused work begins, so its startedAt is real
   // (also lights up the Task Workspace "Started" timeline node) and the
-  // timer below reflects genuine elapsed focus time.
+  // timer reflects genuine elapsed focus time.
   useEffect(() => {
-    if (!step || startedRef.current) return;
+    if (!step || startedRef.current || conflictingSession) return;
     if (step.status !== 'in_progress' && step.status !== 'completed') {
       startedRef.current = true;
       onUpdate(step.id, { status: 'in_progress' });
     }
   }, [step, onUpdate]);
+
+  if (conflictingSession) {
+    return (
+      <div className="fixed inset-0 z-50 bg-base flex items-center justify-center px-6">
+        <div className="text-center max-w-sm space-y-4">
+          <p className="text-secondary">
+            You have an active focus session on "<span className="font-medium text-primary">{session.stepTitle}</span>."
+            Finish or discard it before starting a new one.
+          </p>
+          <button onClick={onClose} className="btn-ghost">Close</button>
+        </div>
+      </div>
+    );
+  }
 
   if (!step) {
     return (
@@ -58,15 +82,24 @@ export default function FocusMode({ task, step, onUpdate, onClose }) {
     );
   }
 
+  const timer = formatElapsed(elapsedMs);
+  const running = !!session?.running;
+
   const complete = async () => {
-    // The timer's own active seconds (paused time excluded) is a more
+    // The session's own active time (paused time excluded) is a more
     // accurate measure of real focus than the wall-clock startedAt->now span
     // the backend would otherwise derive — pass it through when there's
     // anything to report. `undefined` is dropped by JSON.stringify, so an
-    // instant-complete (0 seconds) cleanly falls back to the server's own
+    // instant-complete (0 elapsed) cleanly falls back to the server's own
     // timestamp-based measurement instead of reporting a fabricated 0.
-    const measuredMinutes = timer.seconds > 0 ? Math.max(1, Math.round(timer.seconds / 60)) : undefined;
+    const finalMs = completeSession();
+    const measuredMinutes = finalMs > 0 ? Math.max(1, Math.round(finalMs / 60_000)) : undefined;
     await onUpdate(step.id, { status: 'completed', notes, actualMinutes: measuredMinutes });
+    onClose();
+  };
+
+  const discard = () => {
+    discardSession();
     onClose();
   };
 
@@ -98,12 +131,21 @@ export default function FocusMode({ task, step, onUpdate, onClose }) {
                 Estimated ~<span className="font-mono tabular-nums">{estimatedMinutes}</span> min{overEstimate ? ' — running over' : ''}
               </p>
             )}
-            <button
-              onClick={() => setRunning((r) => !r)}
-              className="mt-3 text-xs text-secondary hover:text-primary border border-border rounded-full px-4 py-1.5"
-            >
-              {running ? '⏸ Pause timer' : '▶ Resume timer'}
-            </button>
+            <div className="flex items-center justify-center gap-2 mt-3">
+              <button
+                onClick={() => (running ? pause() : resume())}
+                className="text-xs text-secondary hover:text-primary border border-border rounded-full px-4 py-1.5"
+              >
+                {running ? '⏸ Pause timer' : '▶ Resume timer'}
+              </button>
+              <button
+                onClick={discard}
+                title="Stop timing this step without completing it"
+                className="text-xs text-muted hover:text-danger px-2 py-1.5"
+              >
+                Discard timer
+              </button>
+            </div>
           </div>
 
           {/* Resources */}
