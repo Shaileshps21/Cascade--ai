@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { GripVertical, Plus, Trash2 } from 'lucide-react';
 import { reorderModuleTasks, addModuleTask, addProjectModule, deleteModuleTask, deleteProjectModule } from '../api/index.js';
-import { SubtaskFieldsRow, emptySubtaskValue, serializeSubtaskValue } from './SubtaskFields.jsx';
+import { SubtaskFieldsRow, emptySubtaskValue, serializeSubtaskValue, isEndDateBeforeStartDate } from './SubtaskFields.jsx';
 
 const RISK_DOT = { high: 'bg-danger', medium: 'bg-warning', low: 'bg-success' };
 const STATUS_LABEL = { not_started: 'Not started', in_progress: 'In progress', completed: 'Completed' };
@@ -65,7 +65,15 @@ function TaskRow({ projectId, task, draggable, deletable, onDelete, isDragging, 
         <span className="flex-1 min-w-0 flex flex-col">
           <span className="text-sm text-secondary group-hover:text-primary truncate">{task.title}</span>
           {task.scheduledStart && (
-            <span className="text-[10px] text-muted truncate">{format(new Date(task.scheduledStart), 'MMM d, h:mm a')}</span>
+            <span className="text-[10px] text-muted truncate">
+              {task.rescheduleCount > 0 && task.originalScheduledStart && (
+                <span className="line-through mr-1">{format(new Date(task.originalScheduledStart), 'MMM d, h:mm a')}</span>
+              )}
+              {format(new Date(task.scheduledStart), 'MMM d, h:mm a')}
+              {task.rescheduleCount > 0 && (
+                <span className="text-warning ml-1">· rescheduled {task.rescheduleCount}x</span>
+              )}
+            </span>
           )}
         </span>
         <span className="text-[10px] text-muted capitalize hidden sm:inline">{task.difficulty}</span>
@@ -149,10 +157,15 @@ function QuickAddSubtask({ onAdd }) {
 
   const submit = async () => {
     if (!value.title.trim() || submitting) return;
+    const serialized = serializeSubtaskValue(value);
+    if (isEndDateBeforeStartDate(serialized.startTime, serialized.deadline)) {
+      setError("End Date can't be before Start Date.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      await onAdd(serializeSubtaskValue(value));
+      await onAdd(serialized);
       setValue(emptySubtaskValue());
     } catch (err) {
       setError(err.message || 'Failed to add subtask.');

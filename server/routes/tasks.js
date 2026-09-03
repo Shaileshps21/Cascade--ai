@@ -7,6 +7,7 @@ import { orchestrateTask, replanTask, resumeTask } from '../agents/orchestrator.
 import { checkSingleTask } from '../agents/progress_tracking_agent/agent.js';
 import { deleteCalendarEvents, syncScheduleToCalendar } from '../agents/google_calendar_agent/agent.js';
 import { createContext, fromFirestoreDocument, toFirestoreDocument, toClientTask, toTaskHistoryEntry } from '../agents/contextManager.js';
+import { isEndDateBeforeStartDate } from '../agents/shared/quickAddTask.js';
 
 const router = express.Router();
 
@@ -144,8 +145,12 @@ router.post('/manual', requireAuth, async (req, res) => {
         if (!isNaN(s.getTime())) subtaskStartTime = s;
       }
 
-      const stepId = 'S1';
       const subtaskTitle = st.title.trim();
+      if (isEndDateBeforeStartDate(subtaskStartTime, subtaskDeadline)) {
+        return res.status(400).json({ error: `Subtask "${subtaskTitle}": End Date can't be before Start Date.` });
+      }
+
+      const stepId = 'S1';
 
       if (subtaskStartTime) {
         scheduledTasks.push({

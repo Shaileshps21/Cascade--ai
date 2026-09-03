@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { createManualProject } from '../api/index.js';
-import { SubtaskFieldsRow, emptySubtaskValue, serializeSubtaskValue } from '../components/SubtaskFields.jsx';
+import { SubtaskFieldsRow, emptySubtaskValue, serializeSubtaskValue, isEndDateBeforeStartDate } from '../components/SubtaskFields.jsx';
 
 let uid = 0;
 const nextId = () => `local-${++uid}-${Date.now()}`;
@@ -98,6 +98,14 @@ export default function ManualProjectBuilder() {
     if (deadline && new Date(deadline) <= new Date()) {
       setError('Deadline must be in the future.');
       return;
+    }
+    for (const mod of cleanModules) {
+      for (const st of mod.subtasks) {
+        if (isEndDateBeforeStartDate(st.startTime, st.deadline)) {
+          setError(`Subtask "${st.title}": End Date can't be before Start Date.`);
+          return;
+        }
+      }
     }
 
     setError('');

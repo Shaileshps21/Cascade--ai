@@ -244,7 +244,16 @@ export default function TaskWorkspace() {
             {task.scheduledStart && (
               <>
                 <span className="text-muted">·</span>
-                <span className="text-xs text-muted">{format(new Date(task.scheduledStart), 'MMM d, h:mm a')}</span>
+                {task.rescheduleCount > 0 && task.originalScheduledStart ? (
+                  <span className="text-xs text-muted">
+                    <span className="line-through">{format(new Date(task.originalScheduledStart), 'MMM d, h:mm a')}</span>
+                    {' → '}
+                    <span className="text-warning font-medium">{format(new Date(task.scheduledStart), 'MMM d, h:mm a')}</span>
+                    {' '}(rescheduled {task.rescheduleCount}x)
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted">{format(new Date(task.scheduledStart), 'MMM d, h:mm a')}</span>
+                )}
               </>
             )}
             {task.deadline && (

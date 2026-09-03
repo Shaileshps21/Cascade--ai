@@ -488,6 +488,9 @@ export async function replanTask(taskId, userId, processId) {
       throw new Error('Task not found');
     }
     const context = fromFirestoreDocument(doc.data());
+    if (context.metadata?.archived) {
+      throw new Error('This project was deleted — nothing to replan.');
+    }
     // Re-fetch preferences (not the value frozen at creation time) so a
     // day/night preference change takes effect on the very next replan.
     context.preferences = await loadUserPreferences(userId);

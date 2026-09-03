@@ -27,7 +27,7 @@ import {
 } from '../agents/contextManager.js';
 import { computeLiveRiskScore, computeDelayProbability } from '../agents/progress_tracking_agent/agent.js';
 import { applyStepUpdate, ALLOWED_STEP_STATUSES } from '../agents/shared/stepProgress.js';
-import { nextTaskId, buildQuickAddTask, buildQuickAddScheduleEntry } from '../agents/shared/quickAddTask.js';
+import { nextTaskId, buildQuickAddTask, buildQuickAddScheduleEntry, isEndDateBeforeStartDate } from '../agents/shared/quickAddTask.js';
 import { nextModuleId, buildManualModule, resolveModuleSource } from '../agents/shared/quickAddModule.js';
 import { syncScheduleToCalendar, deleteCalendarEvents } from '../agents/google_calendar_agent/agent.js';
 
@@ -391,6 +391,9 @@ router.post('/:projectId/tasks', requireAuth, async (req, res) => {
     }
     if (!title?.trim()) {
         return res.status(400).json({ error: '`title` is required.' });
+    }
+    if (isEndDateBeforeStartDate(startTime, deadline)) {
+        return res.status(400).json({ error: "End Date can't be before Start Date." });
     }
 
     try {

@@ -621,6 +621,17 @@ export async function runProgressCron() {
     for (const doc of snapshot.docs) {
         try {
             const context = fromFirestoreDocument(doc.data());
+
+            // Archived (user-deleted) projects must never come back to life:
+            // without this, a project the user deleted from the dashboard —
+            // whose Google Calendar events were already cleaned up on
+            // archive — gets picked back up by this sweep, "escalated" for
+            // running overdue, and replanned, which recreates fresh calendar
+            // events for a project the user no longer has. See DELETE
+            // /api/tasks/:taskId (routes/tasks.js) for the archive-time
+            // cleanup this would otherwise silently undo.
+            if (context.metadata?.archived) continue;
+
             const tasks = context?.planning?.tasks ?? [];
 
             if (tasks.length === 0) continue; // not yet planned — nothing to monitor

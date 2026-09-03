@@ -337,6 +337,13 @@ export function toClientTask(context) {
                 // Scheduling (from scheduler_agent)
                 scheduledStart: slot.startTime ?? null,
                 scheduledEnd: slot.endTime ?? null,
+                // Set only once a replan has actually moved this task (see
+                // replanning_agent's applyRescheduleTracking) — null on a
+                // task that's never been rescheduled, so the client can tell
+                // "never moved" apart from "moved back to its original time".
+                originalScheduledStart: slot.originalStartTime ?? null,
+                originalScheduledEnd: slot.originalEndTime ?? null,
+                rescheduleCount: slot.rescheduleCount ?? 0,
                 estimatedMinutes: slot.adjustedDuration
                     ?? estimationMap.get(task.taskId)?.finalEstimateMinutes
                     ?? task.estimatedMinutes

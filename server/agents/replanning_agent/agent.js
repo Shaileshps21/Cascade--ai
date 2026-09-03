@@ -354,6 +354,33 @@ function protectTailSlots(originalScheduledTasks, newScheduledTasks, warnings) {
 }
 
 /**
+ * Record, on each rescheduled task's own slot, the time it was originally
+ * scheduled for and how many times it's been moved — so the Task Workspace
+ * can show "originally 2pm, now 4pm (rescheduled 2x)" instead of silently
+ * overwriting the slot's only startTime/endTime on every replan.
+ *
+ * `originalStartTime`/`originalEndTime` are captured once, from the first
+ * pre-replan value ever seen for that task, and never overwritten again —
+ * every later replan only bumps `rescheduleCount` and moves start/endTime.
+ *
+ * @param {Array<object>} originalScheduledTasks - snapshot from before this run's changes
+ * @param {Array<object>} newScheduledTasks - mutated in place
+ */
+function applyRescheduleTracking(originalScheduledTasks, newScheduledTasks) {
+    const originalById = new Map((originalScheduledTasks ?? []).map(t => [t.taskId, t]));
+    for (const t of newScheduledTasks ?? []) {
+        if (t?.isBuffer || t?.isReview) continue; // only real work slots are "rescheduled" from the user's perspective
+        const orig = originalById.get(t.taskId);
+        const changed = !orig || orig.startTime !== t.startTime || orig.endTime !== t.endTime;
+        if (!changed) continue;
+
+        t.originalStartTime = orig?.originalStartTime ?? orig?.startTime ?? t.startTime;
+        t.originalEndTime = orig?.originalEndTime ?? orig?.endTime ?? t.endTime;
+        t.rescheduleCount = (orig?.rescheduleCount ?? 0) + 1;
+    }
+}
+
+/**
  * Best-effort Google Calendar re-sync for tasks whose start/end changed:
  * delete the stale event, clear its calendarEventId so
  * syncScheduleToCalendar() recreates it. Never throws — calendar failures
@@ -454,11 +481,25 @@ export async function runReplanningAgent(context, clients, userId, eventBus = nu
 
         const newScheduledTasks = context.schedule.scheduledTasks;
 
+        // Track each moved task's original time + how many times it's moved,
+        // so the Task Workspace can show both instead of only the latest slot.
+        applyRescheduleTracking(originalScheduledTasks, newScheduledTasks);
+
         // ── Step 4: protect review/buffer slots ──────────────────────────────
         protectTailSlots(originalScheduledTasks, newScheduledTasks, warnings);
 
         // ── Step 5: disruption score ──────────────────────────────────────────
         const disruptionScore = computeDisruptionScore(originalScheduledTasks, newScheduledTasks);
+        // progress_tracking_agent's escalation gate reads this same field as
+        // `rePlannedCount` and stops auto-replanning once it hits
+        // MAX_REPLAN_COUNT (3) — without bumping it here, a project that
+        // keeps overrunning gets replanned (and its calendar events
+        // recreated) forever, since the gate never advances. Only count runs
+        // that actually moved something; a no-op replan (nothing overran
+        // enough to change a slot) isn't a "replan" from the user's side.
+        if (disruptionScore > 0) {
+            context.metadata.revisionCount = (context.metadata.revisionCount ?? 0) + 1;
+        }
 
         // ── Step 6: Google Calendar re-sync (best-effort, non-fatal) ─────────
         await resyncCalendar(context, userId, originalScheduledTasks, newScheduledTasks, warnings);

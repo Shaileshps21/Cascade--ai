@@ -127,3 +127,24 @@ export function serializeSubtaskValue(value) {
       : undefined,
   };
 }
+
+/**
+ * True when a subtask's End Date falls strictly before its Start Date.
+ * Mirrors the server-side check (quickAddTask.js's isEndDateBeforeStartDate)
+ * so the builder can reject this before the round trip — compared by
+ * calendar day, since "End Date" is a plain date while "Start Time" carries
+ * a precise time (a same-day End Date must not be rejected just because
+ * midnight precedes the start time).
+ * @param {string|undefined} startTime - ISO datetime, from serializeSubtaskValue()
+ * @param {string|undefined} deadline - ISO date, from serializeSubtaskValue()
+ * @returns {boolean}
+ */
+export function isEndDateBeforeStartDate(startTime, deadline) {
+  if (!startTime || !deadline) return false;
+  const start = new Date(startTime);
+  const end = new Date(deadline);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+  const startDay = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+  const endDay = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+  return endDay < startDay;
+}

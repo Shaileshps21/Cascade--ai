@@ -14,6 +14,28 @@ const PRIORITIES = ['low', 'medium', 'high', 'critical'];
 const DEFAULT_ESTIMATED_MINUTES = 30;
 
 /**
+ * True when a subtask's End Date falls strictly before its Start Date.
+ * `deadline` is a calendar-day cap (SubtaskFields.jsx's "End Date" is a plain
+ * `<input type="date">`), while `startTime` is a precise datetime — comparing
+ * the two as full ISO values would wrongly reject the ordinary case of an End
+ * Date the same day as the Start Date (its midnight timestamp always precedes
+ * a same-day start time). Comparing by UTC calendar day instead matches what
+ * the two fields actually represent, and satisfies "end >= start".
+ * @param {string|Date|null} [startTime] - ISO datetime, or null/undefined if unset
+ * @param {string|Date|null} [deadline] - ISO date/datetime, or null/undefined if unset
+ * @returns {boolean}
+ */
+export function isEndDateBeforeStartDate(startTime, deadline) {
+    if (!startTime || !deadline) return false;
+    const start = new Date(startTime);
+    const end = new Date(deadline);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+    const startDay = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+    const endDay = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+    return endDay < startDay;
+}
+
+/**
  * Next unused "T<n>" taskId, one past the highest numeric suffix among
  * existing tasks. Both planning_agent (`T${i + 1}` in document order) and the
  * Manual Project Builder (`T${taskCounter}`) assign taskIds this way, so
