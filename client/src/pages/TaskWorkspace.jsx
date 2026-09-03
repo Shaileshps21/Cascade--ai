@@ -114,7 +114,7 @@ export default function TaskWorkspace() {
   const { projectId, taskId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const { session: focusSession } = useFocusTimer();
+  const { session: focusSession, discardSession } = useFocusTimer();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -163,6 +163,22 @@ export default function TaskWorkspace() {
     if (wasThisTask && !key) fetchTask();
     prevSessionKeyRef.current = key;
   }, [focusSession, projectId, taskId, fetchTask]);
+
+  // A background Focus Mode session can be running on this task's step while
+  // the user finishes the work by clicking the plain checkboxes on this page
+  // instead of through the Focus Mode overlay/bar. That never goes through
+  // completeSession()/discardSession(), so the session would otherwise sit
+  // in sessionStorage forever "focusing" on a step that's already done (or a
+  // task that's already fully completed). Whenever fresh task data shows
+  // that, clear it.
+  useEffect(() => {
+    if (!data?.task || !focusSession) return;
+    if (focusSession.projectId !== projectId || focusSession.taskId !== taskId) return;
+    const trackedStep = data.task.executionSteps.find((s) => (s.id ?? s.stepId) === focusSession.stepId);
+    if (data.task.status === 'completed' || trackedStep?.status === 'completed') {
+      discardSession();
+    }
+  }, [data, focusSession, projectId, taskId, discardSession]);
 
   const handleStepUpdate = async (stepId, patch) => {
     await updateExecutionStep(projectId, taskId, stepId, patch);
@@ -225,6 +241,12 @@ export default function TaskWorkspace() {
             <span className={`text-xs font-semibold capitalize ${DIFFICULTY_COLOR[task.difficulty] || 'text-muted'}`}>{task.difficulty?.replace('_', ' ')}</span>
             <span className="text-muted">·</span>
             <span className="text-xs text-muted capitalize">{task.priority} priority</span>
+            {task.scheduledStart && (
+              <>
+                <span className="text-muted">·</span>
+                <span className="text-xs text-muted">{format(new Date(task.scheduledStart), 'MMM d, h:mm a')}</span>
+              </>
+            )}
             {task.deadline && (
               <>
                 <span className="text-muted">·</span>

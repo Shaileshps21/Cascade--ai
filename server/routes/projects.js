@@ -215,10 +215,27 @@ router.patch('/:projectId/tasks/:taskId/steps/:stepId', requireAuth, async (req,
         if (!step) return res.status(404).json({ error: 'Execution step not found' });
 
         const nowISO = new Date().toISOString();
+        const wasCompleted = task.progress?.status === 'completed';
 
         // Status transitions, the completion trail and the actual-effort rollup
         // all live in applyStepUpdate() so they can be tested without Firestore.
         applyStepUpdate(task, step, { status, progress, notes, completionEvidence, blockedReason, actualMinutes }, nowISO);
+
+        // Every execution step resolving completes the task — its scheduled
+        // calendar event is no longer meaningful, so it's removed the moment
+        // that happens (not just when the whole subtask is later deleted).
+        if (task.progress.status === 'completed' && !wasCompleted) {
+            const scheduledSlot = (context.schedule?.scheduledTasks ?? []).find((s) => s.taskId === taskId);
+            if (scheduledSlot?.calendarEventId) {
+                try {
+                    await deleteCalendarEvents(req.user.uid, [scheduledSlot.calendarEventId]);
+                } catch (calErr) {
+                    console.warn('[Step PATCH] Calendar cleanup failed (non-fatal):', calErr.message);
+                }
+                delete scheduledSlot.calendarEventId;
+                delete scheduledSlot.calendarLabel;
+            }
+        }
 
         context.metadata.updatedAt = nowISO;
         await doc.ref.set(toFirestoreDocument(context));

@@ -43,7 +43,7 @@ export default function FocusTimerBar() {
 
   if (error) {
     return (
-      <div className="sticky top-0 z-40 bg-danger/10 border-b border-danger/30 px-4 py-2 flex items-center gap-3 text-sm">
+      <div className="bg-danger/10 border-b border-danger/30 px-4 py-2 flex items-center gap-3 text-sm">
         <span className="text-danger flex-1 min-w-0">{error}</span>
         <button
           onClick={() => navigate(`/projects/${session.projectId}/tasks/${session.taskId}`)}
@@ -57,7 +57,7 @@ export default function FocusTimerBar() {
   }
 
   return (
-    <div className="sticky top-0 z-40 bg-brand-500/10 border-b border-brand-500/30 px-4 py-2 flex items-center gap-3 text-sm">
+    <div className="bg-brand-500/10 border-b border-brand-500/30 px-4 py-2 flex items-center gap-3 text-sm">
       <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse flex-shrink-0" />
       <span className="text-secondary truncate flex-1 min-w-0">
         Focusing: <span className="font-medium text-primary">{session.stepTitle}</span>

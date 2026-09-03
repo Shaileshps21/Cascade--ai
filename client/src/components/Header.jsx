@@ -28,7 +28,7 @@ export default function Header() {
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <header className="border-b border-border bg-surface/80 backdrop-blur-md sticky top-0 z-30">
+    <header className="border-b border-border bg-surface/80 backdrop-blur-md">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
         {/* Logo */}
         <div className="flex items-center gap-2.5">

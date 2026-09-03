@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { format } from 'date-fns';
 import { GripVertical, Plus, Trash2 } from 'lucide-react';
 import { reorderModuleTasks, addModuleTask, addProjectModule, deleteModuleTask, deleteProjectModule } from '../api/index.js';
 import { SubtaskFieldsRow, emptySubtaskValue, serializeSubtaskValue } from './SubtaskFields.jsx';
@@ -61,7 +62,12 @@ function TaskRow({ projectId, task, draggable, deletable, onDelete, isDragging, 
         className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface-hover transition-colors group flex-1 min-w-0"
       >
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${task.status === 'completed' ? 'bg-success' : task.status === 'in_progress' ? 'bg-brand-400 animate-pulse' : 'bg-border-strong'}`} />
-        <span className="text-sm text-secondary group-hover:text-primary flex-1 min-w-0 truncate">{task.title}</span>
+        <span className="flex-1 min-w-0 flex flex-col">
+          <span className="text-sm text-secondary group-hover:text-primary truncate">{task.title}</span>
+          {task.scheduledStart && (
+            <span className="text-[10px] text-muted truncate">{format(new Date(task.scheduledStart), 'MMM d, h:mm a')}</span>
+          )}
+        </span>
         <span className="text-[10px] text-muted capitalize hidden sm:inline">{task.difficulty}</span>
         <span className={`text-[11px] font-medium font-mono tabular-nums ${STATUS_COLOR[task.status] || 'text-muted'}`}>
           {task.progress}%
@@ -254,10 +260,13 @@ function ModuleBlock({ projectId, module, isOpen, onToggle, onReorderTasks, onQu
 /**
  * RoadmapTree — Milestones → Modules → Tasks, collapsed by default,
  * expanding only what the user selects (per the plan's Roadmap tab spec).
+ *
+ * Which milestone/module is expanded is controlled by the parent (backed by
+ * URL search params — see ProjectWorkspace.jsx) rather than local state, so
+ * the browser Back button from a task page restores the same tree state
+ * instead of always coming back collapsed.
  */
-export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
-  const [openMilestone, setOpenMilestone] = useState(null);
-  const [openModule, setOpenModule] = useState(null);
+export default function RoadmapTree({ projectId, milestones: milestonesProp, openMilestoneId = null, openModuleId = null, onOpenMilestone, onOpenModule }) {
   const [milestones, setMilestones] = useState(milestonesProp);
   const [reorderError, setReorderError] = useState(null);
 
@@ -359,11 +368,11 @@ export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
         <p className="text-xs text-danger px-1">{reorderError}</p>
       )}
       {milestones.map((milestone) => {
-        const isOpen = openMilestone === milestone.id;
+        const isOpen = openMilestoneId === milestone.id;
         return (
           <div key={milestone.id} className="card overflow-hidden">
             <button
-              onClick={() => setOpenMilestone(isOpen ? null : milestone.id)}
+              onClick={() => onOpenMilestone?.(isOpen ? null : milestone.id)}
               className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-hover transition-colors text-left"
             >
               <span className={`text-secondary transition-transform ${isOpen ? 'rotate-90' : ''}`}>›</span>
@@ -389,8 +398,8 @@ export default function RoadmapTree({ projectId, milestones: milestonesProp }) {
                     key={module.id}
                     projectId={projectId}
                     module={module}
-                    isOpen={openModule === module.id}
-                    onToggle={() => setOpenModule(openModule === module.id ? null : module.id)}
+                    isOpen={openModuleId === module.id}
+                    onToggle={() => onOpenModule?.(openModuleId === module.id ? null : module.id)}
                     onReorderTasks={handleReorderTasks}
                     onQuickAdd={handleQuickAdd}
                     onDeleteTask={handleDeleteTask}

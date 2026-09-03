@@ -22,9 +22,25 @@ function formatElapsed(elapsedMs) {
 export default function FocusMode({ projectId, task, step, onUpdate, onClose }) {
   const { session, elapsedMs, startSession, pause, resume, completeSession, discardSession } = useFocusTimer();
   const [notes, setNotes] = useState(step?.notes ?? '');
-  const startedRef = useRef(false);
+  const startedForStepRef = useRef(null);
+  const hadStepRef = useRef(!!step);
 
   const stepId = step?.id ?? step?.stepId;
+
+  // Reset the notes draft whenever the parent hands us a different step —
+  // otherwise the previous step's in-progress notes would leak into the
+  // next one after auto-advancing.
+  useEffect(() => { setNotes(step?.notes ?? ''); }, [stepId]);
+
+  // The parent (TaskWorkspace) recomputes `step` as "the next unresolved
+  // step" every time task data refreshes. Completing a step therefore
+  // auto-advances Focus Mode to the next one by itself (new `step` prop) —
+  // this overlay only needs to close itself once `step` goes from "there
+  // was one" to null, i.e. the task's very last step just got resolved.
+  useEffect(() => {
+    if (!step && hadStepRef.current) onClose();
+    hadStepRef.current = !!step;
+  }, [step, onClose]);
   // taskIds like "T1" are only unique *within* a project, so projectId must
   // be part of this comparison — otherwise this screen would mistake a
   // session running in a different project's identically-numbered task for
@@ -50,12 +66,12 @@ export default function FocusMode({ projectId, task, step, onUpdate, onClose }) 
   // (also lights up the Task Workspace "Started" timeline node) and the
   // timer reflects genuine elapsed focus time.
   useEffect(() => {
-    if (!step || startedRef.current || conflictingSession) return;
+    if (!step || startedForStepRef.current === stepId || conflictingSession) return;
     if (step.status !== 'in_progress' && step.status !== 'completed') {
-      startedRef.current = true;
+      startedForStepRef.current = stepId;
       onUpdate(step.id, { status: 'in_progress' });
     }
-  }, [step, onUpdate]);
+  }, [step, stepId, conflictingSession, onUpdate]);
 
   if (conflictingSession) {
     return (
@@ -95,7 +111,9 @@ export default function FocusMode({ projectId, task, step, onUpdate, onClose }) 
     const finalMs = completeSession();
     const measuredMinutes = finalMs > 0 ? Math.max(1, Math.round(finalMs / 60_000)) : undefined;
     await onUpdate(step.id, { status: 'completed', notes, actualMinutes: measuredMinutes });
-    onClose();
+    // No onClose() here: the parent will hand us the next unresolved step
+    // (auto-advance) or null (nothing left), which the effect above turns
+    // into a close only in the latter case.
   };
 
   const discard = () => {

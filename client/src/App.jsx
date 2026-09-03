@@ -42,8 +42,14 @@ function AppLayout() {
   return (
     <FocusTimerProvider>
       <div className="min-h-screen bg-base">
-        <Header />
-        <FocusTimerBar />
+        {/* Header and the focus timer bar are stacked inside one sticky
+            wrapper — each was independently `sticky top-0`, so on scroll
+            both stuck to the exact same viewport offset and the timer bar
+            (higher z-index) rendered on top of the header, hiding it. */}
+        <div className="sticky top-0 z-40">
+          <Header />
+          <FocusTimerBar />
+        </div>
         <main>
           <Routes>
             <Route path="/" element={<Dashboard />} />

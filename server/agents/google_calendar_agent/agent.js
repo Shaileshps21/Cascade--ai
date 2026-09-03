@@ -226,7 +226,11 @@ export async function syncScheduleToCalendar(context, userId) {
     // Break/buffer slots are real time blocks in the app's own schedule, but
     // they aren't meaningful calendar events — skip them so they never get a
     // calendarEventId (and therefore nothing to insert or later delete).
-    const pending = updated.filter((t) => !t.calendarEventId && !t.isBuffer);
+    // Already-completed tasks are skipped too: their event (if any) was
+    // already deleted on completion, and a later resync must not recreate a
+    // calendar entry for work that's already done.
+    const pending = updated.filter((t) =>
+        !t.calendarEventId && !t.isBuffer && planningTaskById.get(t.taskId)?.progress?.status !== 'completed');
     if (pending.length === 0) {
         return { scheduledTasks: updated, calendarConnected: true, warnings: [] };
     }

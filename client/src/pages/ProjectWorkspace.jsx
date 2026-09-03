@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import { Home, Map, CalendarClock, BookOpen, BarChart3, StickyNote, Settings, Hourglass, Lightbulb, AlertTriangle, RefreshCw, Calendar } from 'lucide-react';
 import Breadcrumbs from '../components/Breadcrumbs.jsx';
@@ -394,7 +394,36 @@ export default function ProjectWorkspace() {
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [tab, setTab] = useState('overview');
+  // Active tab (and, for the Roadmap tab, which milestone/module is expanded)
+  // lives in the URL rather than component state — component state resets to
+  // its default on every remount, so the browser Back button from a task
+  // page always landed on the Overview tab with the roadmap collapsed,
+  // regardless of what was actually open before navigating away. Updates use
+  // `replace` so expanding/collapsing doesn't itself pile up Back-button
+  // stops; the real stop is the one navigating to a task already creates.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get('tab') || 'overview';
+  const openMilestoneId = searchParams.get('milestone');
+  const openModuleId = searchParams.get('module');
+
+  const setTab = (id) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set('tab', id);
+    return next;
+  }, { replace: true });
+
+  const setOpenMilestone = (id) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    if (id) next.set('milestone', id); else next.delete('milestone');
+    next.delete('module');
+    return next;
+  }, { replace: true });
+
+  const setOpenModule = (id) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    if (id) next.set('module', id); else next.delete('module');
+    return next;
+  }, { replace: true });
 
   const fetchProject = useCallback(async () => {
     try {
@@ -469,7 +498,16 @@ export default function ProjectWorkspace() {
       </div>
 
       {tab === 'overview' && <OverviewTab project={project} />}
-      {tab === 'roadmap' && <RoadmapTree projectId={project.id} milestones={project.milestones} />}
+      {tab === 'roadmap' && (
+        <RoadmapTree
+          projectId={project.id}
+          milestones={project.milestones}
+          openMilestoneId={openMilestoneId}
+          openModuleId={openModuleId}
+          onOpenMilestone={setOpenMilestone}
+          onOpenModule={setOpenModule}
+        />
+      )}
       {tab === 'schedule' && <ScheduleTab project={project} onRescheduled={fetchProject} />}
       {tab === 'resources' && <ResourcesTab project={project} />}
       {tab === 'analytics' && <AnalyticsTab project={project} />}
